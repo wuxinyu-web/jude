@@ -1,8 +1,11 @@
 # Note Cleanup Prompt
 
-Used in `background.js` when the user saves a note (via the floating Note button,
-the `n` shortcut, or the "Save quote as note" button).
+Used in `background.js` when the user saves a transcript note via the floating
+Note button or the `n` shortcut.
 Cleans up the transcript excerpt around the saved timestamp.
+
+Overview quote notes do not use this prompt. They save the text currently shown
+in Overview so Original, Chinese, and bilingual notes keep the selected language.
 
 ## System prompt
 

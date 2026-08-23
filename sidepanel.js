@@ -21,24 +21,130 @@ let currentTranscript = null;
 let currentTranscriptText = null; // Plain text (for display/export)
 let currentTranscriptTimestamped = null; // With timestamps for AI analysis
 let currentTranscriptLanguage = null;
+let currentTranscriptSource = "native";
 let currentVideoTitle = "";
 let currentChannelName = "";
 let currentVideoDescription = "";
 let currentVideoDuration = 0;
 let isAnalysisLoading = false; // Track if analysis is in progress
+let digestGeneration = 0;
+let activeDigestVideoId = null;
+let analysisGeneration = 0;
 let youtubeTabId = null; // Store the YouTube tab ID for reliable messaging
 let errorAction = null;
+let explainSelectionAbortController = null;
+let closeActiveExplanationModal = null;
 
 // --- Translation state ---
 // The public transcript control intentionally supports only the original
 // subtitles, Chinese, and an aligned source + Chinese view.
 let currentTranscriptMode = "original";
+let currentOverviewMode = "original";
 let translationGeneration = 0; // Invalidates responses from older UI modes/videos.
 let translationWorkCount = 0;
+let overviewTranslationGeneration = 0;
+let overviewTranslationWorkCount = 0;
 let transcriptScrollObserver = null;
 // Stable keys include the video, source mode, language, and semantic segment ID.
 let transcriptParagraphCache = new Map();
+let overviewTranslationErrors = new Map();
 const TRANSLATION_MESSAGE_TIMEOUT_MS = 130_000;
+
+// --- Library / vocabulary state ---
+// Vocabulary is loaded globally because saved terms highlight every video,
+// while the Library filter only changes which cards are visible.
+let currentLibraryView = "notes";
+let showAllVocabulary = false;
+let vocabularyEntries = [];
+let vocabularyLoadGeneration = 0;
+const vocabularySavePromises = new Map();
+const VOCABULARY_MATCH_LIMITS = Object.freeze({
+  maxEntries: 500,
+  maxTermLength: 1_000,
+  maxTextLength: 12_000,
+});
+
+// --- Ask state ---
+// Messages intentionally remain in memory. Only generated suggestions are
+// copied into the per-video digest cache.
+const ASK_QUESTION_MAX_LENGTH = 2_000;
+let askMessageSequence = 0;
+
+function createAskState(videoId = null) {
+  return {
+    messages: [],
+    suggestions: [],
+    loading: false,
+    webEnabled: false,
+    generation: 0,
+    videoId: videoId || null,
+    suggestionsLoading: false,
+    suggestionsRequested: false,
+    suggestionsError: "",
+    suggestionsContextReduced: false,
+    lastAnnouncementKey: "",
+    statusSequence: 0,
+  };
+}
+
+const askState = createAskState();
+
+function normalizeAskUiSuggestions(suggestions) {
+  if (!Array.isArray(suggestions)) return [];
+  const normalized = [];
+  const seen = new Set();
+  for (const suggestion of suggestions) {
+    const text = String(suggestion || "").trim().slice(0, 200);
+    const key = text.toLocaleLowerCase();
+    if (!text || seen.has(key)) continue;
+    seen.add(key);
+    normalized.push(text);
+    if (normalized.length === 3) break;
+  }
+  return normalized;
+}
+
+function resetAskStateForVideo(state, videoId, cachedSuggestions = []) {
+  const nextVideoId = videoId || null;
+  if (state.videoId === nextVideoId) {
+    if (!state.suggestions.length) {
+      state.suggestions = normalizeAskUiSuggestions(cachedSuggestions);
+      state.suggestionsRequested = state.suggestions.length > 0;
+    }
+    return state;
+  }
+
+  state.messages = [];
+  state.suggestions = normalizeAskUiSuggestions(cachedSuggestions);
+  state.loading = false;
+  state.webEnabled = false;
+  state.generation += 1;
+  state.videoId = nextVideoId;
+  state.suggestionsLoading = false;
+  state.suggestionsRequested = state.suggestions.length > 0;
+  state.suggestionsError = "";
+  state.suggestionsContextReduced = false;
+  state.lastAnnouncementKey = "";
+  state.statusSequence = 0;
+  return state;
+}
+
+function hydrateAskSuggestionsFromCache(state, cached) {
+  if (!cached || state.suggestions.length) return;
+  state.suggestions = normalizeAskUiSuggestions(cached.askSuggestions);
+  state.suggestionsRequested = state.suggestions.length > 0;
+  state.suggestionsContextReduced =
+    cached.askSuggestionsContextReduced === true;
+}
+
+function shouldLoadAskSuggestions(state) {
+  return Boolean(
+    state.videoId &&
+      !state.suggestions.length &&
+      !state.suggestionsLoading &&
+      !state.suggestionsRequested,
+  );
+}
 
 /**
  * Prevent a stopped service worker or dead message channel from leaving the
@@ -268,6 +374,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     loadNotes(filterAll ? null : currentVideoId);
     sendResponse({ success: true });
   }
+  if (message.action === "vocabularySaved") {
+    refreshVocabularyEntries();
+    sendResponse({ success: true });
+  }
   return false;
 });
 
@@ -379,9 +489,16 @@ function setupEventListeners() {
     .getElementById("exportTranscriptBtn")
     ?.addEventListener("click", exportTranscript);
   document.querySelectorAll(".transcript-mode-btn").forEach((button) => {
-    button.addEventListener("click", () => {
-      handleTranscriptModeChange(button.dataset.transcriptMode);
-    });
+    if (button.dataset.transcriptMode) {
+      button.addEventListener("click", () => {
+        handleTranscriptModeChange(button.dataset.transcriptMode);
+      });
+    }
+    if (button.dataset.overviewMode) {
+      button.addEventListener("click", () => {
+        handleOverviewModeChange(button.dataset.overviewMode);
+      });
+    }
   });
 
   // Follow playback button — re-enables auto-scroll after user scrolled away
@@ -408,6 +525,29 @@ function setupEventListeners() {
     setNotesFilter(true);
     loadNotes(null); // Load all notes
   });
+
+  document.getElementById("libraryNotesTab")?.addEventListener("click", () => {
+    switchLibraryView("notes");
+  });
+  document
+    .getElementById("libraryVocabularyTab")
+    ?.addEventListener("click", () => {
+      switchLibraryView("vocabulary");
+    });
+  document
+    .getElementById("vocabularyFilterThis")
+    ?.addEventListener("click", () => {
+      setVocabularyFilter(false);
+      renderVocabularyForCurrentFilter();
+    });
+  document
+    .getElementById("vocabularyFilterAll")
+    ?.addEventListener("click", () => {
+      setVocabularyFilter(true);
+      renderVocabularyForCurrentFilter();
+    });
+
+  setupAskEventListeners();
 }
 
 function setNotesFilter(showAll) {
@@ -417,6 +557,43 @@ function setNotesFilter(showAll) {
   thisVideoButton?.setAttribute("aria-pressed", String(!showAll));
   allNotesButton?.classList.toggle("active", showAll);
   allNotesButton?.setAttribute("aria-pressed", String(showAll));
+}
+
+function switchLibraryView(view) {
+  if (!["notes", "vocabulary"].includes(view)) return;
+  currentLibraryView = view;
+  const notesActive = view === "notes";
+  const notesButton = document.getElementById("libraryNotesTab");
+  const vocabularyButton = document.getElementById("libraryVocabularyTab");
+  const notesView = document.getElementById("libraryNotesView");
+  const vocabularyView = document.getElementById("libraryVocabularyView");
+
+  notesButton?.classList.toggle("active", notesActive);
+  notesButton?.setAttribute("aria-pressed", String(notesActive));
+  vocabularyButton?.classList.toggle("active", !notesActive);
+  vocabularyButton?.setAttribute("aria-pressed", String(!notesActive));
+  if (notesView) notesView.hidden = !notesActive;
+  if (vocabularyView) vocabularyView.hidden = notesActive;
+
+  if (!notesActive) {
+    renderVocabularyForCurrentFilter();
+  }
+}
+
+function setVocabularyFilter(showAll) {
+  showAllVocabulary = Boolean(showAll);
+  const thisVideoButton = document.getElementById("vocabularyFilterThis");
+  const allVocabularyButton = document.getElementById("vocabularyFilterAll");
+  thisVideoButton?.classList.toggle("active", !showAllVocabulary);
+  thisVideoButton?.setAttribute(
+    "aria-pressed",
+    String(!showAllVocabulary),
+  );
+  allVocabularyButton?.classList.toggle("active", showAllVocabulary);
+  allVocabularyButton?.setAttribute(
+    "aria-pressed",
+    String(showAllVocabulary),
+  );
 }
 
 // ============================================================
@@ -528,31 +705,58 @@ function extractVideoId(url) {
 // ============================================================
 
 async function startDigest(videoId, videoUrl) {
+  if (videoId !== askState.videoId) {
+    resetAskStateForVideo(askState, videoId);
+    renderAskUi();
+  }
+
   // Check if we already have this video loaded in memory
   if (videoId === currentVideoId && currentAnalysis) {
     showState("results");
     return;
   }
 
+  const requestSnapshot = {
+    generation: ++digestGeneration,
+    videoId,
+  };
+  activeDigestVideoId = videoId;
+  analysisGeneration += 1;
+  isAnalysisLoading = false;
+
   // Every video change invalidates observer work and in-flight translations.
   if (videoId !== currentVideoId) {
+    closeActiveExplanationModal?.();
     translationGeneration += 1;
+    overviewTranslationGeneration += 1;
     if (transcriptScrollObserver) transcriptScrollObserver.disconnect();
     transcriptScrollObserver = null;
   }
 
+  currentVideoId = videoId;
+  currentVideoUrl = videoUrl;
+  currentAnalysis = null;
+  currentTranscript = null;
+  currentTranscriptText = null;
+  currentTranscriptTimestamped = null;
+  currentTranscriptLanguage = null;
+  currentTranscriptSource = "native";
+
   // Check cache for this video
-  const cached = await loadFromCache(videoId);
+  const cached = await loadFromCache(videoId, requestSnapshot);
+  if (!isCurrentDigestRequest(requestSnapshot)) return;
   if (cached) {
     debugLog("Loading from cache:", videoId);
-    currentVideoId = videoId;
-    currentVideoUrl = videoUrl;
-    currentAnalysis = cached.analysis || null;
+    currentAnalysis =
+      typeof cached.analysis?.summary === "string" && cached.analysis.summary
+        ? cached.analysis
+        : null;
     currentTranscript = cached.transcript;
     currentTranscriptText = cached.transcriptText;
     currentTranscriptTimestamped = cached.transcriptTimestamped;
     currentTranscriptLanguage = cached.transcriptLanguage || null;
-    isAnalysisLoading = false;
+    currentTranscriptSource = cached.transcriptSource || "native";
+    hydrateAskSuggestionsFromCache(askState, cached);
 
     // Restore semantic-segment translations from persistent storage.
     if (cached.paragraphCache) {
@@ -575,28 +779,22 @@ async function startDigest(videoId, videoUrl) {
     if (currentAnalysis) {
       renderAnalysisResults(currentAnalysis);
       highlightMomentsOnPage(currentAnalysis.keyMoments);
+      if (currentOverviewMode !== "original") translateOverview();
     }
 
     showState("results");
     document.getElementById("tabsNav").style.display = "flex";
 
     // Load notes for this video
-    loadNotes(videoId);
+    loadNotes(videoId, requestSnapshot);
+    refreshVocabularyEntries(requestSnapshot);
 
     // Setup explain feature
     setupExplainFeature();
     if (currentTranscriptMode !== "original") translateTranscript();
+    renderAskUi();
     return;
   }
-
-  currentVideoId = videoId;
-  currentVideoUrl = videoUrl;
-  currentAnalysis = null;
-  currentTranscript = null;
-  currentTranscriptText = null;
-  currentTranscriptTimestamped = null;
-  currentTranscriptLanguage = null;
-  isAnalysisLoading = false;
 
   if (currentVideoTitle || currentChannelName) {
     const videoInfo = document.getElementById("videoInfo");
@@ -611,13 +809,22 @@ async function startDigest(videoId, videoUrl) {
   const transcriptResult = await chrome.runtime.sendMessage({
     action: "fetchTranscript",
     videoId: videoId,
+    mode: "native",
   });
+  if (!isCurrentDigestRequest(requestSnapshot)) return;
 
   if (!transcriptResult.success) {
     if (transcriptResult.error === "NO_SUPADATA_KEY") {
       showError(
         "API key missing",
         "Add your Supadata API key in YouTube Digest Settings.",
+      );
+      return;
+    }
+    if (transcriptResult.error === "NO_TRANSCRIPT") {
+      showMissingTranscriptError(
+        transcriptResult.message ||
+          "No native subtitle track is available for this video.",
       );
       return;
     }
@@ -628,10 +835,31 @@ async function startDigest(videoId, videoUrl) {
     return;
   }
 
+  await completeTranscriptLoad(videoId, transcriptResult, requestSnapshot);
+}
+
+function isCurrentDigestRequest(snapshot) {
+  return Boolean(
+    snapshot &&
+      snapshot.generation === digestGeneration &&
+      snapshot.videoId === activeDigestVideoId &&
+      snapshot.videoId === currentVideoId,
+  );
+}
+
+async function completeTranscriptLoad(videoId, transcriptResult, requestSnapshot) {
+  if (
+    videoId !== requestSnapshot?.videoId ||
+    !isCurrentDigestRequest(requestSnapshot)
+  ) {
+    return false;
+  }
+  errorAction = null;
   currentTranscript = transcriptResult.transcript;
   currentTranscriptText = transcriptResult.transcriptText;
   currentTranscriptTimestamped = transcriptResult.transcriptTextTimestamped;
   currentTranscriptLanguage = transcriptResult.language || null;
+  currentTranscriptSource = transcriptResult.source || "native";
 
   // Render transcript immediately (no LLM needed)
   renderTranscript();
@@ -639,17 +867,21 @@ async function startDigest(videoId, videoUrl) {
   document.getElementById("tabsNav").style.display = "flex";
 
   // Load notes for this video
-  loadNotes(videoId);
+  loadNotes(videoId, requestSnapshot);
+  refreshVocabularyEntries(requestSnapshot);
 
   // Setup explain feature for text selection
   setupExplainFeature();
   if (currentTranscriptMode !== "original") translateTranscript();
+  renderAskUi();
 
   // Save transcript to cache (without analysis)
-  await saveToCache(videoId);
+  await saveToCache(videoId, requestSnapshot);
+  if (!isCurrentDigestRequest(requestSnapshot)) return false;
 
   // DON'T run LLM analysis automatically - wait for user to click Overview tab
   // This saves tokens when user just wants to see the transcript
+  return true;
 }
 
 // ============================================================
@@ -658,21 +890,29 @@ async function startDigest(videoId, videoUrl) {
 
 /**
  * Renders the analysis results into the Overview tab.
- * Shows chapters and key quotes only.
+ * Shows the full-video summary, chapters, and key quotes.
  */
 function renderAnalysisResults(analysis) {
+  const summary = document.getElementById("overviewSummary");
+  if (summary) {
+    summary.innerHTML = renderOverviewField(
+      analysis.summary || "Summary unavailable.",
+      "overview-summary",
+    );
+  }
+
   // Chapters
   const chapterList = document.getElementById("chapterList");
   chapterList.innerHTML = "";
-  (analysis.chapters || []).forEach((chapter) => {
+  (analysis.chapters || []).forEach((chapter, index) => {
     const li = document.createElement("li");
     li.className = "chapter-item";
     li.dataset.seconds = chapter.timestampSeconds;
     li.innerHTML = `
       <span class="chapter-timestamp">${escapeHtml(chapter.timestamp)}</span>
       <div class="chapter-content">
-        <span class="chapter-title">${escapeHtml(chapter.title)}</span>
-        <span class="chapter-summary">${escapeHtml(chapter.summary || "")}</span>
+        <span class="chapter-title">${renderOverviewField(chapter.title, `chapter-title-${index}`)}</span>
+        <span class="chapter-summary">${renderOverviewField(chapter.summary || "", `chapter-summary-${index}`)}</span>
       </div>
     `;
     li.addEventListener("click", () => {
@@ -692,16 +932,20 @@ function renderAnalysisResults(analysis) {
   const sortedQuotes = [...(analysis.keyQuotes || [])].sort(
     (a, b) => (a.timestampSeconds || 0) - (b.timestampSeconds || 0),
   );
-  sortedQuotes.forEach((quote) => {
+  sortedQuotes.forEach((quote, index) => {
+    const quoteFieldId = `quote-${index}`;
+    const quoteTranslationReady =
+      currentOverviewMode === "original" ||
+      Boolean(getOverviewTranslation(quoteFieldId));
     const div = document.createElement("div");
     div.className = "quote-item";
     div.dataset.seconds = quote.timestampSeconds;
     div.innerHTML = `
-      <div class="quote-text">${escapeHtml(quote.quote)}</div>
+      <div class="quote-text">${renderOverviewField(quote.quote, quoteFieldId)}</div>
       <div class="quote-meta">
         <span class="quote-timestamp">${escapeHtml(quote.timestamp)}</span>
         <div class="quote-actions">
-          <button class="quote-save-note-btn" title="Save this quote as a note">📝 Note</button>
+          <button class="quote-save-note-btn" title="${quoteTranslationReady ? "Save this quote as a note" : "Wait for the selected language to finish translating"}" ${quoteTranslationReady ? "" : "disabled"}>${quoteTranslationReady ? "📝 Note" : "Translating…"}</button>
           <button class="quote-copy-btn" title="Copy this quote">⧉ Copy</button>
         </div>
       </div>
@@ -719,7 +963,9 @@ function renderAnalysisResults(analysis) {
     quoteCopyBtn.addEventListener("click", async (e) => {
       e.stopPropagation();
       try {
-        await navigator.clipboard.writeText(quote.quote);
+        await navigator.clipboard.writeText(
+          getOverviewFieldDisplayText(quote.quote, `quote-${index}`),
+        );
         quoteCopyBtn.textContent = "✓ Copied";
         setTimeout(() => {
           quoteCopyBtn.textContent = "⧉ Copy";
@@ -732,7 +978,7 @@ function renderAnalysisResults(analysis) {
     const quoteSaveNoteBtn = div.querySelector(".quote-save-note-btn");
     quoteSaveNoteBtn.addEventListener("click", async (e) => {
       e.stopPropagation();
-      await saveQuoteAsNote(quote, quoteSaveNoteBtn);
+      await saveQuoteAsNote(quote, quoteFieldId, quoteSaveNoteBtn);
     });
 
     quotesList.appendChild(div);
@@ -742,8 +988,12 @@ function renderAnalysisResults(analysis) {
 /**
  * Saves a key quote as a timestamped note.
  */
-async function saveQuoteAsNote(quote, btn) {
+async function saveQuoteAsNote(quote, fieldId, btn) {
   if (!currentVideoId) return;
+
+  const translatedText = getOverviewTranslation(fieldId);
+  if (currentOverviewMode !== "original" && !translatedText) return;
+  const noteText = getOverviewFieldDisplayText(quote.quote, fieldId);
 
   const originalText = btn.textContent;
   btn.textContent = "Saving...";
@@ -751,11 +1001,14 @@ async function saveQuoteAsNote(quote, btn) {
 
   try {
     const result = await chrome.runtime.sendMessage({
-      action: "saveNote",
+      action: "saveOverviewNote",
       videoId: currentVideoId,
       timestamp: quote.timestampSeconds,
       videoTitle: currentVideoTitle,
       channelName: currentChannelName,
+      noteText,
+      rawText: quote.quote,
+      languageMode: currentOverviewMode,
     });
 
     if (result.success) {
@@ -824,31 +1077,130 @@ function seekFromTranscriptEntryClick(event, seconds) {
   seekTo(seconds);
 }
 
+function getDisplayedTranscriptRowText(row) {
+  const originalOnly = row.querySelector(".transcript-text");
+  if (originalOnly) {
+    return String(originalOnly.textContent || "").replace(/\s+/g, " ").trim();
+  }
+
+  const parts = [];
+  const original = row.querySelector(".transcript-original");
+  const translation = row.querySelector(".transcript-translation");
+  if (original?.textContent?.trim()) {
+    parts.push(original.textContent.replace(/\s+/g, " ").trim());
+  }
+  if (
+    translation?.textContent?.trim() &&
+    !translation.classList.contains("translation-pending") &&
+    !translation.classList.contains("translation-error")
+  ) {
+    parts.push(translation.textContent.replace(/\s+/g, " ").trim());
+  }
+  return parts.join("\n");
+}
+
+function getTranscriptRowActionMetadata(row, segment) {
+  const displayedText = getDisplayedTranscriptRowText(row);
+  if (!displayedText) return null;
+  const metadata = buildVocabularySelectionMetadata(
+    displayedText,
+    row,
+    getActiveTranscriptSegments(),
+    currentTranscriptText || "",
+    {
+      videoId: currentVideoId,
+      videoTitle: currentVideoTitle,
+      channelName: currentChannelName,
+    },
+  );
+  if (!metadata.sourceExcerpt && segment?.text) {
+    metadata.sourceExcerpt = segment.text;
+  }
+  return metadata;
+}
+
+function bindTranscriptRowAction(button, row, segment, handler) {
+  button.addEventListener("click", async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const metadata = getTranscriptRowActionMetadata(row, segment);
+    if (!metadata?.term) return;
+    await handler(metadata);
+  });
+}
+
+function syncTranscriptRowActions(row) {
+  const unavailable = !getDisplayedTranscriptRowText(row);
+  row.querySelectorAll(".transcript-row-action").forEach((button) => {
+    button.disabled = unavailable;
+  });
+}
+
+function addTranscriptRowActions(row, segment) {
+  const actions = document.createElement("div");
+  actions.className = "transcript-row-actions";
+
+  const explainButton = document.createElement("button");
+  explainButton.className = "transcript-row-action transcript-row-explain";
+  explainButton.type = "button";
+  explainButton.textContent = "Explain";
+  explainButton.setAttribute("aria-label", "Explain this transcript segment");
+  bindTranscriptRowAction(explainButton, row, segment, async (metadata) => {
+    await showExplanation(metadata.term, metadata.context, metadata, explainButton);
+  });
+
+  const saveButton = document.createElement("button");
+  saveButton.className = "transcript-row-action transcript-row-save";
+  saveButton.type = "button";
+  saveButton.textContent = "Save";
+  saveButton.setAttribute(
+    "aria-label",
+    "Save this transcript segment to Vocabulary",
+  );
+  bindTranscriptRowAction(saveButton, row, segment, async (metadata) => {
+    await saveVocabularySelection(metadata, saveButton);
+  });
+
+  actions.append(explainButton, saveButton);
+  row.appendChild(actions);
+  syncTranscriptRowActions(row);
+}
+
+function renderTranscriptSourceBadge(languageLabel) {
+  const generated = currentTranscriptSource === "generated";
+  const sourceLabel = generated
+    ? "AI-generated from video audio"
+    : "From video subtitles";
+  const dotClass = generated ? "source-dot--ai" : "source-dot--subs";
+  return `<span class="source-dot ${dotClass}"></span> ${sourceLabel} · ${escapeHtml(languageLabel)}`;
+}
+
 function renderTranscript() {
   if (!currentTranscript) return;
 
   const transcriptList = document.getElementById("transcriptList");
   transcriptList.innerHTML = "";
 
-  // Show a small badge indicating the transcript came from the video's
-  // existing subtitles. (We no longer AI-transcribe audio, so subtitles
-  // are the only source.)
+  // Show whether text came from an existing subtitle track or opt-in audio
+  // transcription, so users can judge the source before relying on it.
   const existingBadge = document.getElementById("transcriptSourceBadge");
   if (existingBadge) existingBadge.remove();
 
   const badge = document.createElement("div");
   badge.id = "transcriptSourceBadge";
   badge.className = "transcript-source-badge";
-  badge.innerHTML = `<span class="source-dot source-dot--subs"></span> From video subtitles · ${escapeHtml(getOriginalTranscriptLabel())}`;
+  badge.innerHTML = renderTranscriptSourceBadge(getOriginalTranscriptLabel());
   transcriptList.parentElement.insertBefore(badge, transcriptList);
 
   // Group entries using smart sentence-boundary + time-guardrail logic
   const grouped = groupTranscriptEntries(currentTranscript);
 
-  grouped.forEach((group) => {
+  grouped.forEach((group, index) => {
     const div = document.createElement("div");
     div.className = "transcript-entry";
     div.dataset.seconds = group.start;
+    div.dataset.segmentId = group.id;
+    div.dataset.segmentIndex = index;
 
     const minutes = Math.floor(group.start / 60);
     const seconds = Math.floor(group.start % 60);
@@ -859,11 +1211,15 @@ function renderTranscript() {
       <span class="transcript-text">${renderSubtitleInlineMarkup(group.text)}</span>
     `;
 
+    addTranscriptRowActions(div, group);
+
     div.addEventListener("click", (event) =>
       seekFromTranscriptEntryClick(event, group.start),
     );
     transcriptList.appendChild(div);
   });
+
+  applyVocabularyHighlights(transcriptList);
 
   // Start tracking video playback for auto-scroll
   startPlaybackTracking();
@@ -922,7 +1278,13 @@ function showState(state) {
     state === "results" ? "flex" : "none";
 
   if (state !== "results") {
+    closeActiveExplanationModal?.();
+    document.getElementById("contentArea")?.classList.remove("ask-mode");
     stopPlaybackTracking();
+  } else if (
+    document.querySelector('.tab.active[data-tab="ask"]')
+  ) {
+    document.getElementById("contentArea")?.classList.add("ask-mode");
   }
 }
 
@@ -937,6 +1299,77 @@ function showError(title, message) {
   document.getElementById("errorTitle").textContent = title;
   document.getElementById("errorMessage").textContent = message;
   document.getElementById("errorBtn").textContent = "Try Again";
+}
+
+function buildAudioTranscriptionConfirmation(durationSeconds) {
+  const seconds = Number(durationSeconds) || 0;
+  if (seconds <= 0) {
+    return (
+      "Supadata will generate a transcript from the video audio. " +
+      "This uses approximately 2 credits per video minute and may take several minutes. Continue?"
+    );
+  }
+
+  const minutes = Math.max(1, Math.ceil(seconds / 60));
+  const estimatedCredits = minutes * 2;
+  return (
+    `This video is approximately ${minutes} minute${minutes === 1 ? "" : "s"} long. ` +
+    `AI transcription may use approximately ${estimatedCredits} Supadata credits ` +
+    "and may take several minutes. Continue?"
+  );
+}
+
+function showMissingTranscriptError(message) {
+  showError("No transcript found", message);
+  document.getElementById("errorBtn").textContent =
+    "Generate transcript from audio";
+  errorAction = generateTranscriptFromAudio;
+}
+
+async function generateTranscriptFromAudio() {
+  if (!currentVideoId) return;
+  const confirmed = window.confirm(
+    buildAudioTranscriptionConfirmation(currentVideoDuration),
+  );
+  if (!confirmed) return;
+
+  const videoId = currentVideoId;
+  const requestSnapshot = {
+    generation: digestGeneration,
+    videoId,
+  };
+  errorAction = null;
+  showState("loading");
+  updateLoading(
+    "Generating transcript from audio",
+    "This may take several minutes. You can keep the side panel open.",
+  );
+
+  try {
+    const transcriptResult = await chrome.runtime.sendMessage({
+      action: "fetchTranscript",
+      videoId,
+      mode: "generate",
+    });
+    if (!isCurrentDigestRequest(requestSnapshot)) return;
+
+    if (!transcriptResult.success) {
+      showError(
+        "Transcription failed",
+        transcriptResult.message || transcriptResult.error,
+      );
+      document.getElementById("errorBtn").textContent = "Try generation again";
+      errorAction = generateTranscriptFromAudio;
+      return;
+    }
+
+    await completeTranscriptLoad(videoId, transcriptResult, requestSnapshot);
+  } catch (error) {
+    if (!isCurrentDigestRequest(requestSnapshot)) return;
+    showError("Transcription failed", error.message || "Please try again.");
+    document.getElementById("errorBtn").textContent = "Try generation again";
+    errorAction = generateTranscriptFromAudio;
+  }
 }
 
 function showConfigError(configStatus) {
@@ -957,6 +1390,12 @@ function showConfigError(configStatus) {
 // ============================================================
 
 function switchTab(tabName) {
+  const contentArea = document.getElementById("contentArea");
+  contentArea?.classList.toggle("ask-mode", tabName === "ask");
+  if (tabName === "ask") {
+    contentArea.scrollTop = 0;
+  }
+
   document.querySelectorAll(".tab").forEach((tab) => {
     tab.classList.toggle("active", tab.dataset.tab === tabName);
   });
@@ -976,6 +1415,627 @@ function switchTab(tabName) {
   if (tabName === "overview" && !currentAnalysis && !isAnalysisLoading) {
     triggerAnalysis();
   }
+
+  if (tabName === "ask") {
+    renderAskUi();
+    ensureAskSuggestions();
+  }
+
+  if (tabName === "library") {
+    if (currentLibraryView === "vocabulary") {
+      renderVocabularyForCurrentFilter();
+    } else {
+      const showAll = document
+        .getElementById("notesFilterAll")
+        ?.classList.contains("active");
+      loadNotes(showAll ? null : currentVideoId);
+    }
+  }
+}
+
+// ============================================================
+// ASK
+// ============================================================
+
+function normalizeAskComposerQuestion(value) {
+  if (typeof value !== "string") {
+    throw new Error("Enter a question about this video.");
+  }
+  const question = value.trim();
+  if (!question) throw new Error("Enter a question about this video.");
+  if (question.length > ASK_QUESTION_MAX_LENGTH) {
+    throw new Error("Questions are limited to 2,000 characters.");
+  }
+  return question;
+}
+
+function nextAskMessageId() {
+  askMessageSequence += 1;
+  return `ask-${Date.now()}-${askMessageSequence}`;
+}
+
+function getCompletedAskHistory(messages) {
+  const history = [];
+  const source = Array.isArray(messages) ? messages : [];
+  for (let index = 0; index < source.length - 1; index += 1) {
+    const user = source[index];
+    const assistant = source[index + 1];
+    if (
+      user?.role === "user" &&
+      user.status === "complete" &&
+      assistant?.role === "assistant" &&
+      assistant.status === "complete"
+    ) {
+      history.push(
+        { role: "user", content: String(user.content || "") },
+        { role: "assistant", content: String(assistant.content || "") },
+      );
+      index += 1;
+    }
+  }
+  return history;
+}
+
+function buildAskRequestPayload({
+  question,
+  messages = [],
+  history,
+  webEnabled,
+  videoId,
+  transcriptText,
+  videoTitle,
+  channelName,
+  videoDescription,
+  videoDuration,
+  overview,
+}) {
+  const completedHistory = Array.isArray(history)
+    ? history.map((message) => ({
+        role: message.role,
+        content: String(message.content || ""),
+      }))
+    : getCompletedAskHistory(messages);
+  return {
+    action: "askVideo",
+    question: normalizeAskComposerQuestion(question),
+    history: completedHistory,
+    videoId: videoId || null,
+    transcriptText: String(transcriptText || ""),
+    videoTitle: String(videoTitle || ""),
+    channelName: String(channelName || ""),
+    videoDescription: String(videoDescription || ""),
+    videoDuration: Number(videoDuration) || 0,
+    overview: overview && typeof overview === "object" ? overview : null,
+    webEnabled: webEnabled === true,
+  };
+}
+
+function safeAskExternalUrl(value) {
+  try {
+    const parsed = new URL(String(value || ""));
+    if (!["http:", "https:"].includes(parsed.protocol)) return "";
+    if (parsed.username || parsed.password) return "";
+    return parsed.href;
+  } catch (_error) {
+    return "";
+  }
+}
+
+function normalizeAskAssistantResult(result) {
+  const sources = [];
+  if (Array.isArray(result?.sources)) {
+    for (const source of result.sources) {
+      const url = safeAskExternalUrl(source?.url);
+      if (!url) continue;
+      sources.push({
+        title: String(source?.title || "Source").trim().slice(0, 300) || "Source",
+        url,
+      });
+      if (sources.length === 5) break;
+    }
+  }
+  return {
+    answer:
+      String(result?.answer || "").trim().slice(0, 20_000) ||
+      "No answer was returned.",
+    sources,
+    contextReduced: result?.contextReduced === true,
+    webWarning: String(result?.webWarning || "").trim().slice(0, 1_000),
+  };
+}
+
+function isCurrentAskSnapshot(state, snapshot) {
+  return Boolean(
+    snapshot &&
+      state.videoId === snapshot.videoId &&
+      state.generation === snapshot.generation,
+  );
+}
+
+function beginAskRequest(state, question, { retryMessageId = null } = {}) {
+  if (state.loading) return null;
+  const normalizedQuestion = normalizeAskComposerQuestion(question);
+  if (!state.videoId) throw new Error("Open a YouTube video before asking.");
+  const history = getCompletedAskHistory(state.messages);
+
+  if (retryMessageId) {
+    const errorIndex = state.messages.findIndex(
+      (message) =>
+        message.id === retryMessageId && message.status === "error",
+    );
+    if (errorIndex < 0) throw new Error("This question can no longer be retried.");
+    state.messages.splice(errorIndex, 1);
+  } else {
+    state.messages.push({
+      id: nextAskMessageId(),
+      role: "user",
+      content: normalizedQuestion,
+      status: "complete",
+    });
+  }
+
+  state.loading = true;
+  state.statusSequence += 1;
+  return {
+    question: normalizedQuestion,
+    history,
+    webEnabled: state.webEnabled === true,
+    snapshot: {
+      videoId: state.videoId,
+      generation: state.generation,
+    },
+  };
+}
+
+function applyAskRequestResult(state, snapshot, result, question) {
+  if (!isCurrentAskSnapshot(state, snapshot)) return false;
+
+  if (result?.success === true) {
+    const answer = normalizeAskAssistantResult(result);
+    state.messages.push({
+      id: nextAskMessageId(),
+      role: "assistant",
+      content: answer.answer,
+      status: "complete",
+      sources: answer.sources,
+      contextReduced: answer.contextReduced,
+      webWarning: answer.webWarning,
+    });
+  } else {
+    state.messages.push({
+      id: nextAskMessageId(),
+      role: "assistant",
+      content: String(
+        result?.message || result?.error || "Could not answer this question.",
+      )
+        .trim()
+        .slice(0, 1_000),
+      status: "error",
+      retryQuestion: question,
+    });
+  }
+
+  state.loading = false;
+  return true;
+}
+
+function resolveAskChipAction(question, currentWebEnabled, enableWeb) {
+  return {
+    question: normalizeAskComposerQuestion(question),
+    webEnabled: enableWeb === true || currentWebEnabled === true,
+  };
+}
+
+function setupAskEventListeners() {
+  const form = document.getElementById("askForm");
+  const input = document.getElementById("askInput");
+  const webToggle = document.getElementById("askWebToggle");
+
+  form?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    submitAskFromComposer();
+  });
+  input?.addEventListener("input", () => {
+    setAskComposerError("");
+    updateAskComposerUi();
+  });
+  input?.addEventListener("keydown", (event) => {
+    if (
+      event.key === "Enter" &&
+      !event.shiftKey &&
+      !event.isComposing
+    ) {
+      event.preventDefault();
+      submitAskFromComposer();
+    }
+  });
+  webToggle?.addEventListener("change", () => {
+    askState.webEnabled = webToggle.checked === true;
+  });
+
+  document.querySelectorAll("[data-ask-question]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const action = resolveAskChipAction(
+        button.dataset.askQuestion,
+        askState.webEnabled,
+        button.dataset.enableWeb === "true",
+      );
+      setAskWebEnabled(action.webEnabled);
+      submitAskQuestion(action.question);
+    });
+  });
+  updateAskComposerUi();
+}
+
+function setAskWebEnabled(enabled) {
+  askState.webEnabled = enabled === true;
+  const toggle = document.getElementById("askWebToggle");
+  if (toggle) toggle.checked = askState.webEnabled;
+}
+
+function setAskComposerError(message) {
+  const error = document.getElementById("askComposerError");
+  if (error) error.textContent = String(message || "");
+}
+
+function updateAskComposerUi() {
+  const input = document.getElementById("askInput");
+  const sendButton = document.getElementById("askSendBtn");
+  const characterCount = document.getElementById("askCharacterCount");
+  const webToggle = document.getElementById("askWebToggle");
+  const value = String(input?.value || "");
+  const canSend =
+    value.trim().length > 0 &&
+    value.length <= ASK_QUESTION_MAX_LENGTH &&
+    !askState.loading;
+
+  if (sendButton) sendButton.disabled = !canSend;
+  if (characterCount) {
+    characterCount.textContent = `${value.length} / ${ASK_QUESTION_MAX_LENGTH}`;
+  }
+  if (webToggle) {
+    webToggle.checked = askState.webEnabled;
+    webToggle.disabled = askState.loading;
+  }
+  document.querySelectorAll(".ask-chip").forEach((button) => {
+    button.disabled = askState.loading;
+  });
+}
+
+function submitAskFromComposer() {
+  const input = document.getElementById("askInput");
+  const question = String(input?.value || "");
+  if (!submitAskQuestion(question)) return;
+  if (input) input.value = "";
+  updateAskComposerUi();
+}
+
+function submitAskQuestion(question, options = {}) {
+  let request;
+  try {
+    request = beginAskRequest(askState, question, options);
+  } catch (error) {
+    setAskComposerError(error.message);
+    return false;
+  }
+  if (!request) return false;
+
+  setAskComposerError("");
+  renderAskConversation();
+  updateAskComposerUi();
+  void deliverAskRequest(request);
+  return true;
+}
+
+async function deliverAskRequest(request) {
+  const payload = buildAskRequestPayload({
+    question: request.question,
+    history: request.history,
+    webEnabled: request.webEnabled,
+    videoId: request.snapshot.videoId,
+    transcriptText: currentTranscriptTimestamped || currentTranscriptText,
+    videoTitle: currentVideoTitle,
+    channelName: currentChannelName,
+    videoDescription: currentVideoDescription,
+    videoDuration: currentVideoDuration,
+    overview: currentAnalysis,
+  });
+
+  let result;
+  try {
+    result = await chrome.runtime.sendMessage(payload);
+  } catch (error) {
+    result = {
+      success: false,
+      message: error.message || "Could not answer this question.",
+    };
+  }
+
+  if (
+    !applyAskRequestResult(
+      askState,
+      request.snapshot,
+      result,
+      request.question,
+    )
+  ) {
+    return;
+  }
+  renderAskConversation();
+  updateAskComposerUi();
+}
+
+async function ensureAskSuggestions({ retry = false } = {}) {
+  if (retry) {
+    askState.suggestionsRequested = false;
+    askState.suggestionsError = "";
+  }
+  if (!shouldLoadAskSuggestions(askState) || !currentTranscriptTimestamped) {
+    renderAskSuggestions();
+    return;
+  }
+
+  askState.suggestionsLoading = true;
+  askState.suggestionsRequested = true;
+  const snapshot = {
+    videoId: askState.videoId,
+    generation: askState.generation,
+  };
+  renderAskSuggestions();
+
+  try {
+    const result = await chrome.runtime.sendMessage({
+      action: "suggestVideoQuestions",
+      videoId: snapshot.videoId,
+      transcriptText: currentTranscriptTimestamped,
+      videoTitle: currentVideoTitle,
+      channelName: currentChannelName,
+      videoDescription: currentVideoDescription,
+      videoDuration: currentVideoDuration,
+      overview: currentAnalysis,
+    });
+    if (!isCurrentAskSnapshot(askState, snapshot)) return;
+
+    const suggestions = normalizeAskUiSuggestions(result?.suggestions);
+    if (result?.success === true && suggestions.length === 3) {
+      askState.suggestions = suggestions;
+      askState.suggestionsContextReduced = result.contextReduced === true;
+      askState.suggestionsError = "";
+      await saveToCache(snapshot.videoId);
+    } else {
+      askState.suggestionsError = String(
+        result?.message || result?.error || "Suggested questions are unavailable.",
+      )
+        .trim()
+        .slice(0, 500);
+    }
+  } catch (error) {
+    if (!isCurrentAskSnapshot(askState, snapshot)) return;
+    askState.suggestionsError = String(
+      error.message || "Suggested questions are unavailable.",
+    )
+      .trim()
+      .slice(0, 500);
+  } finally {
+    if (isCurrentAskSnapshot(askState, snapshot)) {
+      askState.suggestionsLoading = false;
+      renderAskSuggestions();
+      updateAskComposerUi();
+    }
+  }
+}
+
+function captureAskFocusedControl(container) {
+  const active = document.activeElement;
+  if (!active || !container?.contains(active)) return null;
+  return { key: String(active.dataset?.askFocusKey || "") };
+}
+
+function restoreAskFocusedControl(snapshot) {
+  if (!snapshot) return;
+  const candidate = snapshot.key
+    ? document.querySelector(
+        `[data-ask-focus-key="${CSS.escape(snapshot.key)}"]`,
+      )
+    : null;
+  if (candidate) {
+    candidate.focus({ preventScroll: true });
+    return;
+  }
+  document.getElementById("askInput")?.focus({ preventScroll: true });
+}
+
+function getAskStatusAnnouncement(state) {
+  if (state.loading) {
+    return {
+      key: `loading:${state.statusSequence}`,
+      text: "AI is thinking.",
+    };
+  }
+  const latest = [...state.messages]
+    .reverse()
+    .find((message) => message.role === "assistant");
+  if (!latest) return null;
+  const prefix = latest.status === "error" ? "AI answer failed. " : "AI answer: ";
+  return {
+    key: `${latest.status}:${latest.id}`,
+    text: `${prefix}${String(latest.content || "").slice(0, 2_000)}`,
+  };
+}
+
+function announceAskStatus(state) {
+  const status = document.getElementById("askStatus");
+  if (!status) return;
+  const announcement = getAskStatusAnnouncement(state);
+  if (!announcement) {
+    status.textContent = "";
+    return;
+  }
+  if (state.lastAnnouncementKey === announcement.key) return;
+  state.lastAnnouncementKey = announcement.key;
+  status.textContent = announcement.text;
+}
+
+function renderAskSuggestions() {
+  const container = document.getElementById("askGeneratedSuggestions");
+  if (!container) return;
+  const focusSnapshot = captureAskFocusedControl(container);
+  container.replaceChildren();
+
+  if (askState.suggestionsLoading) {
+    const status = document.createElement("span");
+    status.className = "ask-suggestions-status";
+    status.textContent = "Generating video-specific questions...";
+    container.appendChild(status);
+    restoreAskFocusedControl(focusSnapshot);
+    return;
+  }
+
+  if (askState.suggestions.length) {
+    askState.suggestions.forEach((suggestion, index) => {
+      const button = document.createElement("button");
+      button.className = "ask-chip";
+      button.type = "button";
+      button.textContent = suggestion;
+      button.dataset.askFocusKey = `suggestion:${index}`;
+      button.addEventListener("click", () => {
+        const action = resolveAskChipAction(
+          suggestion,
+          askState.webEnabled,
+          false,
+        );
+        submitAskQuestion(action.question);
+      });
+      container.appendChild(button);
+    });
+    restoreAskFocusedControl(focusSnapshot);
+    return;
+  }
+
+  if (askState.suggestionsError) {
+    const status = document.createElement("span");
+    status.className = "ask-suggestions-status";
+    status.textContent = "Video-specific questions are unavailable.";
+    const retryButton = document.createElement("button");
+    retryButton.className = "ask-suggestions-retry";
+    retryButton.type = "button";
+    retryButton.textContent = "Retry";
+    retryButton.dataset.askFocusKey = "suggestions-retry";
+    retryButton.addEventListener("click", () =>
+      ensureAskSuggestions({ retry: true }),
+    );
+    container.append(status, retryButton);
+  }
+  restoreAskFocusedControl(focusSnapshot);
+}
+
+function renderAskConversation() {
+  const messagesContainer = document.getElementById("askMessages");
+  if (!messagesContainer) return;
+  const focusSnapshot = captureAskFocusedControl(messagesContainer);
+  messagesContainer.replaceChildren();
+
+  if (!askState.messages.length && !askState.loading) {
+    const empty = document.createElement("div");
+    empty.className = "ask-empty";
+    empty.textContent =
+      "Choose a suggested question or ask anything grounded in this video.";
+    messagesContainer.appendChild(empty);
+  }
+
+  askState.messages.forEach((message) => {
+    const messageElement = document.createElement("article");
+    const visualRole = message.status === "error" ? "error" : message.role;
+    messageElement.className = `ask-message ${visualRole}`;
+    messageElement.dataset.messageId = message.id;
+    messageElement.setAttribute(
+      "aria-label",
+      message.role === "user" ? "Your question" : "AI answer",
+    );
+
+    const messageBody = document.createElement("div");
+    messageBody.className = "ask-message-body";
+    messageBody.textContent = message.content;
+    messageElement.appendChild(messageBody);
+
+    if (message.status === "error") {
+      const retryButton = document.createElement("button");
+      retryButton.className = "ask-retry-btn";
+      retryButton.type = "button";
+      retryButton.textContent = "Retry";
+      retryButton.dataset.askFocusKey = `retry:${message.id}`;
+      retryButton.addEventListener("click", () => {
+        submitAskQuestion(message.retryQuestion, {
+          retryMessageId: message.id,
+        });
+      });
+      messageElement.appendChild(retryButton);
+    }
+
+    if (message.contextReduced || message.webWarning) {
+      const metadata = document.createElement("div");
+      metadata.className = "ask-message-meta";
+      if (message.contextReduced) {
+        const contextLabel = document.createElement("span");
+        contextLabel.className = "ask-context-label";
+        contextLabel.textContent = "Selected transcript excerpts used";
+        metadata.appendChild(contextLabel);
+      }
+      if (message.webWarning) {
+        const warning = document.createElement("span");
+        warning.className = "ask-web-warning";
+        warning.textContent = message.webWarning;
+        metadata.appendChild(warning);
+      }
+      messageElement.appendChild(metadata);
+    }
+
+    if (Array.isArray(message.sources) && message.sources.length) {
+      const sources = document.createElement("div");
+      sources.className = "ask-sources";
+      const sourcesTitle = document.createElement("div");
+      sourcesTitle.className = "ask-sources-title";
+      sourcesTitle.textContent = "Web sources";
+      sources.appendChild(sourcesTitle);
+      message.sources.forEach((source, sourceIndex) => {
+        const sourceLink = document.createElement("a");
+        sourceLink.className = "ask-source-link";
+        sourceLink.href = source.url;
+        sourceLink.target = "_blank";
+        sourceLink.rel = "noopener noreferrer";
+        sourceLink.textContent = source.title;
+        sourceLink.dataset.askFocusKey = `source:${message.id}:${sourceIndex}`;
+        sources.appendChild(sourceLink);
+      });
+      messageElement.appendChild(sources);
+    }
+
+    messagesContainer.appendChild(messageElement);
+  });
+
+  if (askState.loading) {
+    const thinkingMessage = document.createElement("div");
+    thinkingMessage.className = "ask-message assistant";
+    const thinking = document.createElement("div");
+    thinking.className = "ask-message-body ask-thinking";
+    thinking.textContent = "Thinking...";
+    thinkingMessage.appendChild(thinking);
+    messagesContainer.appendChild(thinkingMessage);
+  }
+
+  const askScrollRegion = document.getElementById("askScrollRegion");
+  if (askScrollRegion) {
+    askScrollRegion.scrollTop = askScrollRegion.scrollHeight;
+  }
+  restoreAskFocusedControl(focusSnapshot);
+  announceAskStatus(askState);
+}
+
+function renderAskUi() {
+  setAskWebEnabled(askState.webEnabled);
+  renderAskSuggestions();
+  renderAskConversation();
+  updateAskComposerUi();
 }
 
 /**
@@ -986,12 +2046,20 @@ async function triggerAnalysis() {
   if (!currentTranscriptTimestamped || isAnalysisLoading || currentAnalysis)
     return;
 
+  const requestSnapshot = {
+    analysisGeneration: ++analysisGeneration,
+    digestGeneration,
+    videoId: currentVideoId,
+    transcriptTimestamped: currentTranscriptTimestamped,
+  };
   isAnalysisLoading = true;
 
   // Show loading indicators in the Overview tab
   const chapterList = document.getElementById("chapterList");
   const quotesList = document.getElementById("quotesList");
+  const summary = document.getElementById("overviewSummary");
 
+  if (summary) summary.textContent = "Loading summary...";
   if (chapterList)
     chapterList.innerHTML =
       '<li class="chapter-item" style="color: var(--text-muted); border: none;">Loading chapters...</li>';
@@ -1008,27 +2076,42 @@ async function triggerAnalysis() {
       videoDescription: currentVideoDescription,
       videoDuration: currentVideoDuration,
     });
+    if (!isCurrentAnalysisRequest(requestSnapshot)) return;
 
     if (!analysisResult.success) {
       if (chapterList)
         chapterList.innerHTML = `<li class="chapter-item" style="color: var(--accent); border: none;">Analysis failed: ${escapeHtml(analysisResult.error || "Unknown error")}</li>`;
-      isAnalysisLoading = false;
       return;
     }
 
     currentAnalysis = analysisResult.analysis;
     renderAnalysisResults(currentAnalysis);
     highlightMomentsOnPage(currentAnalysis.keyMoments);
+    if (currentOverviewMode !== "original") await translateOverview();
+    if (!isCurrentAnalysisRequest(requestSnapshot)) return;
 
     // Save to cache now that we have analysis
-    await saveToCache(currentVideoId);
+    await saveToCache(requestSnapshot.videoId, requestSnapshot);
   } catch (error) {
+    if (!isCurrentAnalysisRequest(requestSnapshot)) return;
     console.error("[YouTube Digest Panel] Analysis error:", error);
     if (chapterList)
       chapterList.innerHTML = `<li class="chapter-item" style="color: var(--accent); border: none;">Error: ${escapeHtml(error.message)}</li>`;
+  } finally {
+    if (isCurrentAnalysisRequest(requestSnapshot)) {
+      isAnalysisLoading = false;
+    }
   }
+}
 
-  isAnalysisLoading = false;
+function isCurrentAnalysisRequest(snapshot) {
+  return Boolean(
+    snapshot &&
+      snapshot.analysisGeneration === analysisGeneration &&
+      snapshot.digestGeneration === digestGeneration &&
+      snapshot.videoId === currentVideoId &&
+      snapshot.transcriptTimestamped === currentTranscriptTimestamped,
+  );
 }
 
 // ============================================================
@@ -1177,25 +2260,30 @@ function sanitizeFilename(str) {
 
 /**
  * Sets up text selection handling in the transcript.
- * When user selects text, shows an "Explain" button.
+ * When user selects text, shows Explain and vocabulary Save actions.
  */
 function setupExplainFeature() {
+  explainSelectionAbortController?.abort();
+  explainSelectionAbortController = null;
   const transcriptList = document.getElementById("transcriptList");
   if (!transcriptList) return;
+  explainSelectionAbortController = new AbortController();
 
   // Remove existing tooltip if any
   const existingTooltip = document.getElementById("explainTooltip");
   if (existingTooltip) existingTooltip.remove();
 
-  // Create the explain tooltip/button
+  // Create the selection actions.
   const tooltip = document.createElement("div");
   tooltip.id = "explainTooltip";
   tooltip.className = "explain-tooltip";
-  tooltip.innerHTML = `<button class="explain-btn">💡 Explain</button>`;
+  tooltip.innerHTML = `<button class="explain-btn" type="button">💡 Explain</button><button class="vocabulary-save-btn" type="button">Save</button>`;
   tooltip.style.display = "none";
   document.body.appendChild(tooltip);
 
   let selectedText = "";
+  let selectedContext = "";
+  let selectedVocabularyMetadata = null;
 
   // Interacting with Explain must preserve the transcript selection and stay
   // isolated from document/row click behavior.
@@ -1211,35 +2299,64 @@ function setupExplainFeature() {
   });
 
   // Listen for text selection
-  document.addEventListener("mouseup", (e) => {
-    const selection = window.getSelection();
-    const text = selection.toString().trim();
+  document.addEventListener(
+    "mouseup",
+    (e) => {
+      const selection = window.getSelection();
+      const text = selection.toString().trim();
 
-    // Only show if selecting within transcript
-    const isInTranscript = transcriptList.contains(selection.anchorNode);
+      // Only show if selecting within transcript
+      const isInTranscript = transcriptList.contains(selection.anchorNode);
 
-    // Allow any selection length (removed 10+ char requirement)
-    if (text.length > 0 && isInTranscript) {
-      selectedText = text;
+      // Allow any selection length (removed 10+ char requirement)
+      if (text.length > 0 && isInTranscript) {
+        selectedText = text;
+        const selectedTranscriptEntry = getSelectionTranscriptEntry(
+          selection,
+          transcriptList,
+        );
+        selectedContext = buildExplainContextFromSelection(
+          selectedText,
+          selectedTranscriptEntry,
+          getActiveTranscriptSegments(),
+          currentTranscriptText || "",
+        );
+        selectedVocabularyMetadata = buildVocabularySelectionMetadata(
+          selectedText,
+          selectedTranscriptEntry,
+          getActiveTranscriptSegments(),
+          currentTranscriptText || "",
+          {
+            videoId: currentVideoId,
+            videoTitle: currentVideoTitle,
+            channelName: currentChannelName,
+          },
+        );
 
-      // Position the tooltip near the selection
-      const range = selection.getRangeAt(0);
-      const rect = range.getBoundingClientRect();
+        // Position the tooltip near the selection
+        const range = selection.getRangeAt(0);
+        const rect = range.getBoundingClientRect();
 
-      tooltip.style.display = "block";
-      tooltip.style.top = `${rect.bottom + window.scrollY + 8}px`;
-      tooltip.style.left = `${rect.left + rect.width / 2}px`;
-    } else {
-      tooltip.style.display = "none";
-    }
-  });
+        tooltip.style.display = "block";
+        tooltip.style.top = `${rect.bottom + window.scrollY + 8}px`;
+        tooltip.style.left = `${rect.left + rect.width / 2}px`;
+      } else {
+        tooltip.style.display = "none";
+      }
+    },
+    { signal: explainSelectionAbortController.signal },
+  );
 
   // Hide tooltip when clicking elsewhere
-  document.addEventListener("mousedown", (e) => {
-    if (!tooltip.contains(e.target)) {
-      tooltip.style.display = "none";
-    }
-  });
+  document.addEventListener(
+    "mousedown",
+    (e) => {
+      if (!tooltip.contains(e.target)) {
+        tooltip.style.display = "none";
+      }
+    },
+    { signal: explainSelectionAbortController.signal },
+  );
 
   // Handle explain button click
   tooltip
@@ -1249,47 +2366,358 @@ function setupExplainFeature() {
       event.stopPropagation();
       if (!selectedText) return;
 
-      tooltip.style.display = "none";
-      await showExplanation(selectedText);
+      await showExplanation(
+        selectedText,
+        selectedContext,
+        selectedVocabularyMetadata,
+        event.currentTarget,
+      );
+    });
+
+  tooltip
+    .querySelector(".vocabulary-save-btn")
+    .addEventListener("click", async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!selectedVocabularyMetadata) return;
+      await saveVocabularySelection(
+        selectedVocabularyMetadata,
+        event.currentTarget,
+      );
     });
 }
 
 /**
- * Shows the explanation modal and fetches it from the configured AI provider.
+ * Finds the semantic transcript row containing either end of the selection.
  */
-async function showExplanation(selectedText) {
-  // Create modal
+function getSelectionTranscriptEntry(selection, transcriptList) {
+  for (const node of [selection?.anchorNode, selection?.focusNode]) {
+    const element = node?.nodeType === 1 ? node : node?.parentElement;
+    const entry = element?.closest?.(".transcript-entry");
+    if (entry && transcriptList.contains(entry)) return entry;
+  }
+  return null;
+}
+
+/**
+ * Uses stable row metadata to recover original source context even when the
+ * visible selection came from a Chinese translation. String lookup remains a
+ * fallback for legacy rows or selections without semantic metadata.
+ */
+function buildExplainContextFromSelection(
+  selectedText,
+  transcriptEntry,
+  sourceSegments,
+  fullText,
+) {
+  const segments = Array.isArray(sourceSegments) ? sourceSegments : [];
+  const segmentId = transcriptEntry?.dataset?.segmentId || "";
+  let index = segments.findIndex((segment) => segment.id === segmentId);
+  if (index < 0) {
+    const datasetIndex = Number(transcriptEntry?.dataset?.segmentIndex);
+    if (Number.isInteger(datasetIndex) && segments[datasetIndex]) {
+      index = datasetIndex;
+    }
+  }
+
+  if (index >= 0) {
+    return segments
+      .slice(Math.max(0, index - 1), Math.min(segments.length, index + 2))
+      .map((segment) => segment.text)
+      .filter(Boolean)
+      .join(" ");
+  }
+
+  return getTranscriptContext(selectedText, fullText);
+}
+
+function renderExplanationText(text) {
+  return String(text || "")
+    .split(/\n{2,}/)
+    .map(
+      (paragraph) =>
+        `<p>${escapeHtml(paragraph).replace(/\n/g, "<br>")}</p>`,
+    )
+    .join("");
+}
+
+function renderExplanationContent(mode, english, chinese, translationError) {
+  const normalizedMode = ["english", "zh", "bilingual"].includes(mode)
+    ? mode
+    : "english";
+  const source = `<section class="explain-text explain-source" lang="en">${renderExplanationText(english)}</section>`;
+  const translation = chinese
+    ? `<section class="explain-text explain-translation" lang="zh-CN">${renderExplanationText(chinese)}</section>`
+    : translationError
+      ? `<div class="explain-translation-error"><span>${escapeHtml(translationError)}</span><button class="explain-retry-btn" type="button">Retry</button></div>`
+      : `<div class="explain-loading explain-translation-loading"><div class="loading-bar"></div><span>Translating...</span></div>`;
+
+  if (normalizedMode === "english") return source;
+  if (normalizedMode === "zh" && chinese) return translation;
+  if (normalizedMode === "zh" && translationError) {
+    return `${source}${translation}`;
+  }
+  if (normalizedMode === "zh") return translation;
+  return `${source}<div class="explain-bilingual-divider" role="separator"></div>${translation}`;
+}
+
+function createExplanationTranslationState(
+  english = "",
+  videoId = null,
+  videoTitle = "",
+) {
+  return {
+    mode: "english",
+    english: String(english || ""),
+    videoId,
+    videoTitle: String(videoTitle || ""),
+    chinese: "",
+    translationError: "",
+    translationPromise: null,
+    translationGeneration: 0,
+  };
+}
+
+/**
+ * Lazily translates one English explanation. The state belongs to one modal,
+ * so duplicate language switches share a request and late detached-modal
+ * replies cannot mutate the current UI.
+ */
+function ensureExplanationTranslation(
+  state,
+  {
+    sendMessage = sendTranslationMessage,
+    videoTitle = state.videoTitle,
+    isCurrent = () => true,
+    retry = false,
+  } = {},
+) {
+  if (state.chinese) return Promise.resolve(state.chinese);
+  if (state.translationPromise) return state.translationPromise;
+  if (state.translationError && !retry) return Promise.resolve("");
+  if (!state.english) return Promise.resolve("");
+
+  const generation = ++state.translationGeneration;
+  state.translationError = "";
+  let responsePromise;
+  try {
+    responsePromise = sendMessage({
+      action: "translateContent",
+      content: {
+        segments: [{ id: "explain-0", text: state.english }],
+      },
+      contentType: "explainBatch",
+      targetLanguage: "zh",
+      videoTitle,
+    });
+  } catch (error) {
+    responsePromise = Promise.reject(error);
+  }
+  state.translationPromise = Promise.resolve(responsePromise)
+    .then((result) => {
+      if (!isCurrent() || generation !== state.translationGeneration) return "";
+      if (!result?.success) {
+        throw new Error(result?.error || "Translation failed.");
+      }
+      const translated = result.translatedContent?.segments?.find(
+        (segment) => segment.id === "explain-0",
+      )?.text;
+      if (!translated?.trim()) throw new Error("Translation returned no text.");
+      state.chinese = translated.trim();
+      return state.chinese;
+    })
+    .catch((error) => {
+      if (isCurrent() && generation === state.translationGeneration) {
+        state.translationError = error.message || "Translation failed.";
+      }
+      return "";
+    })
+    .finally(() => {
+      if (generation === state.translationGeneration) {
+        state.translationPromise = null;
+      }
+    });
+  return state.translationPromise;
+}
+
+/**
+ * Shows the explanation modal and fetches one concise English explanation.
+ */
+function getModalFocusableElements(modal) {
+  return Array.from(
+    modal.querySelectorAll(
+      'button:not([disabled]), a[href], input:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    ),
+  ).filter(
+    (element) =>
+      !element.hidden && element.getAttribute("aria-hidden") !== "true",
+  );
+}
+
+async function showExplanation(
+  selectedText,
+  transcriptContext,
+  vocabularySelection = null,
+  invoker = null,
+) {
+  const modalVideoId = currentVideoId;
+  const modalVideoTitle = currentVideoTitle;
+  const modalInvoker = invoker || document.activeElement;
+  const modalVocabularySelection = vocabularySelection || {
+    term: selectedText,
+    sourceExcerpt: selectedText,
+    context: transcriptContext,
+    videoId: modalVideoId,
+    videoTitle: String(modalVideoTitle || ""),
+    channelName: currentChannelName,
+    timestamp: 0,
+  };
+  const previousModal = document.getElementById("explainModal");
+  if (closeActiveExplanationModal) {
+    closeActiveExplanationModal();
+  } else if (previousModal) {
+    previousModal.remove();
+  }
+
   const modal = document.createElement("div");
   modal.id = "explainModal";
   modal.className = "explain-modal-overlay";
   modal.innerHTML = `
-    <div class="explain-modal">
+    <div class="explain-modal" role="dialog" aria-modal="true" aria-labelledby="explainModalTitle">
       <div class="explain-modal-header">
-        <div class="explain-modal-title">Explain</div>
-        <button class="explain-modal-close" id="closeExplain">✕</button>
+        <div class="explain-modal-title" id="explainModalTitle">Explain</div>
+        <button class="explain-modal-close" id="closeExplain" type="button" aria-label="Close explanation">✕</button>
       </div>
       <div class="explain-selected-text">"${escapeHtml(selectedText.substring(0, 200))}${selectedText.length > 200 ? "..." : ""}"</div>
+      <div class="explain-language-controls" role="group" aria-label="Explanation language">
+        <button class="explain-language-btn active" type="button" data-explain-mode="english" aria-pressed="true">English</button>
+        <button class="explain-language-btn" type="button" data-explain-mode="zh" aria-pressed="false">中文</button>
+        <button class="explain-language-btn" type="button" data-explain-mode="bilingual" aria-pressed="false">双语</button>
+      </div>
       <div class="explain-modal-content" id="explanationContent">
         <div class="explain-loading">
           <div class="loading-bar"></div>
           <span>Analyzing...</span>
         </div>
       </div>
+      <div class="explain-modal-actions">
+        <button class="explain-save-vocabulary" type="button">Save to Vocabulary</button>
+      </div>
     </div>
   `;
 
   document.body.appendChild(modal);
+  const state = createExplanationTranslationState(
+    "",
+    modalVideoId,
+    modalVideoTitle,
+  );
+  const contentDiv = modal.querySelector("#explanationContent");
+  const modeButtons = modal.querySelectorAll("[data-explain-mode]");
+  const closeButton = modal.querySelector("#closeExplain");
+  const saveVocabularyButton = modal.querySelector(
+    ".explain-save-vocabulary",
+  );
+  const isCurrent = () =>
+    modal.isConnected &&
+    currentVideoId === modalVideoId &&
+    document.getElementById("explainModal") === modal;
+  const render = () => {
+    if (!isCurrent()) return;
+    if (!state.english) return;
+    contentDiv.innerHTML = renderExplanationContent(
+      state.mode,
+      state.english,
+      state.chinese,
+      state.translationError,
+    );
+  };
+  const requestChinese = async () => {
+    if (!state.english || state.mode === "english") return;
+    render();
+    await ensureExplanationTranslation(state, {
+      videoTitle: modalVideoTitle,
+      isCurrent,
+    });
+    render();
+  };
+  let closed = false;
+  const closeModal = () => {
+    if (closed) return;
+    closed = true;
+    state.translationGeneration += 1;
+    modal.remove();
+    if (closeActiveExplanationModal === closeModal) {
+      closeActiveExplanationModal = null;
+    }
+    if (modalInvoker?.isConnected && typeof modalInvoker.focus === "function") {
+      modalInvoker.focus({ preventScroll: true });
+    }
+  };
+  closeActiveExplanationModal = closeModal;
 
   // Close handlers
-  document
-    .getElementById("closeExplain")
-    .addEventListener("click", () => modal.remove());
+  closeButton.addEventListener("click", closeModal);
+  saveVocabularyButton.addEventListener("click", () =>
+    saveVocabularySelection(modalVocabularySelection, saveVocabularyButton),
+  );
   modal.addEventListener("click", (e) => {
-    if (e.target === modal) modal.remove();
+    if (e.target === modal) closeModal();
   });
-
-  // Get some context around the selection from the transcript
-  const transcriptContext = getTranscriptContext(selectedText);
+  modal.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeModal();
+      return;
+    }
+    if (event.key === "Tab") {
+      const focusable = getModalFocusableElements(modal);
+      if (!focusable.length) {
+        event.preventDefault();
+        closeButton.focus({ preventScroll: true });
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (
+        event.shiftKey &&
+        (document.activeElement === first || !modal.contains(document.activeElement))
+      ) {
+        event.preventDefault();
+        last.focus({ preventScroll: true });
+      } else if (
+        !event.shiftKey &&
+        (document.activeElement === last || !modal.contains(document.activeElement))
+      ) {
+        event.preventDefault();
+        first.focus({ preventScroll: true });
+      }
+    }
+  });
+  closeButton.focus({ preventScroll: true });
+  modeButtons.forEach((button) => {
+    button.addEventListener("click", async () => {
+      state.mode = button.dataset.explainMode;
+      modeButtons.forEach((candidate) => {
+        const active = candidate === button;
+        candidate.classList.toggle("active", active);
+        candidate.setAttribute("aria-pressed", String(active));
+      });
+      render();
+      await requestChinese();
+    });
+  });
+  contentDiv.addEventListener("click", async (event) => {
+    if (!event.target.closest(".explain-retry-btn")) return;
+    const retryPromise = ensureExplanationTranslation(state, {
+      videoTitle: modalVideoTitle,
+      isCurrent,
+      retry: true,
+    });
+    render();
+    await retryPromise;
+    render();
+  });
 
   // Fetch explanation
   try {
@@ -1297,17 +2725,23 @@ async function showExplanation(selectedText) {
       action: "explainSelection",
       selectedText: selectedText,
       transcriptContext: transcriptContext,
-      videoTitle: currentVideoTitle,
+      videoTitle: modalVideoTitle,
     });
 
-    const contentDiv = document.getElementById("explanationContent");
+    if (!isCurrent()) return;
     if (result.success) {
-      contentDiv.innerHTML = `<div class="explain-text">${escapeHtml(result.explanation).replace(/\n\n/g, "</p><p>").replace(/\n/g, "<br>")}</div>`;
+      state.english = String(result.explanation || "").trim();
+      if (!state.english) {
+        contentDiv.innerHTML = `<div class="explain-error">The explanation was empty. Please try again.</div>`;
+        return;
+      }
+      render();
+      await requestChinese();
     } else {
       contentDiv.innerHTML = `<div class="explain-error">Failed to get explanation: ${escapeHtml(result.error)}</div>`;
     }
   } catch (error) {
-    const contentDiv = document.getElementById("explanationContent");
+    if (!isCurrent()) return;
     contentDiv.innerHTML = `<div class="explain-error">Error: ${escapeHtml(error.message)}</div>`;
   }
 }
@@ -1315,8 +2749,8 @@ async function showExplanation(selectedText) {
 /**
  * Gets surrounding context from the transcript for the selected text.
  */
-function getTranscriptContext(selectedText) {
-  const fullText = currentTranscriptText || "";
+function getTranscriptContext(selectedText, transcriptText = currentTranscriptText || "") {
+  const fullText = transcriptText || "";
   const index = fullText.indexOf(selectedText);
 
   if (index === -1) return "";
@@ -1329,6 +2763,676 @@ function getTranscriptContext(selectedText) {
 }
 
 // ============================================================
+// LIBRARY / VOCABULARY
+// ============================================================
+
+/**
+ * Captures the displayed selection while recovering its original subtitle
+ * excerpt and context from stable row metadata.
+ */
+function buildVocabularySelectionMetadata(
+  selectedText,
+  transcriptEntry,
+  sourceSegments,
+  fullText,
+  videoMetadata = {},
+) {
+  const segments = Array.isArray(sourceSegments) ? sourceSegments : [];
+  const segmentId = transcriptEntry?.dataset?.segmentId || "";
+  let index = segments.findIndex((segment) => segment.id === segmentId);
+  if (index < 0) {
+    const datasetIndex = Number(transcriptEntry?.dataset?.segmentIndex);
+    if (Number.isInteger(datasetIndex) && segments[datasetIndex]) {
+      index = datasetIndex;
+    }
+  }
+
+  const sourceExcerpt = index >= 0
+    ? String(segments[index]?.text || "")
+    : String(selectedText || "");
+  const context = index >= 0
+    ? segments
+        .slice(Math.max(0, index - 1), Math.min(segments.length, index + 2))
+        .map((segment) => segment.text)
+        .filter(Boolean)
+        .join(" ")
+    : getTranscriptContext(selectedText, fullText);
+  const rowSeconds = Number(transcriptEntry?.dataset?.seconds);
+  const segmentSeconds = Number(segments[index]?.start);
+  const timestamp = Number.isFinite(rowSeconds)
+    ? rowSeconds
+    : Number.isFinite(segmentSeconds)
+      ? segmentSeconds
+      : 0;
+
+  return {
+    term: String(selectedText || "").trim(),
+    sourceExcerpt,
+    context,
+    videoId: String(videoMetadata.videoId || ""),
+    videoTitle: String(videoMetadata.videoTitle || ""),
+    channelName: String(videoMetadata.channelName || ""),
+    timestamp,
+  };
+}
+
+function buildVocabularySaveMessage(selection) {
+  return {
+    action: "saveVocabulary",
+    term: String(selection?.term || ""),
+    sourceExcerpt: String(selection?.sourceExcerpt || ""),
+    context: String(selection?.context || ""),
+    videoId: String(selection?.videoId || ""),
+    videoTitle: String(selection?.videoTitle || ""),
+    channelName: String(selection?.channelName || ""),
+    timestamp: Number(selection?.timestamp) || 0,
+  };
+}
+
+function vocabularySaveKey(selection) {
+  const term = String(selection?.term || "")
+    .normalize("NFKC")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLocaleLowerCase();
+  return `${term}\u0000${selection?.videoId || ""}\u0000${Number(selection?.timestamp) || 0}`;
+}
+
+function setVocabularySaveFeedback(button, label, disabled) {
+  if (!button) return;
+  if (!button.dataset.defaultLabel) {
+    button.dataset.defaultLabel = button.textContent || "Save";
+  }
+  button.textContent = label;
+  button.disabled = disabled;
+}
+
+async function saveVocabularySelection(selection, button) {
+  const message = buildVocabularySaveMessage(selection);
+  if (!message.term || !message.videoId) {
+    setVocabularySaveFeedback(button, "Could not save", false);
+    return { success: false };
+  }
+
+  const key = vocabularySaveKey(selection);
+  setVocabularySaveFeedback(button, "Saving…", true);
+  let request = vocabularySavePromises.get(key);
+  if (!request) {
+    try {
+      request = Promise.resolve(chrome.runtime.sendMessage(message));
+    } catch (error) {
+      request = Promise.reject(error);
+    }
+    vocabularySavePromises.set(key, request);
+    const clearRequest = () => {
+      if (vocabularySavePromises.get(key) === request) {
+        vocabularySavePromises.delete(key);
+      }
+    };
+    request.then(clearRequest, clearRequest);
+  }
+
+  try {
+    const result = await request;
+    if (!result?.success) {
+      throw new Error(result?.message || result?.error || "Could not save");
+    }
+    setVocabularySaveFeedback(
+      button,
+      result.alreadySaved ? "Already saved" : "Saved",
+      true,
+    );
+    await refreshVocabularyEntries();
+    setTimeout(() => {
+      if (!button?.isConnected) return;
+      setVocabularySaveFeedback(button, button.dataset.defaultLabel, false);
+    }, 1800);
+    return result;
+  } catch (error) {
+    console.error("[YouTube Digest Panel] Save vocabulary error:", error);
+    setVocabularySaveFeedback(button, "Could not save", false);
+    return { success: false, error: error.message };
+  }
+}
+
+async function refreshVocabularyEntries(requestSnapshot = null) {
+  const generation = ++vocabularyLoadGeneration;
+  try {
+    const result = await chrome.runtime.sendMessage({ action: "getVocabulary" });
+    if (
+      generation !== vocabularyLoadGeneration ||
+      (requestSnapshot && !isCurrentDigestRequest(requestSnapshot))
+    ) {
+      return;
+    }
+    vocabularyEntries = result?.success && Array.isArray(result.vocabulary)
+      ? result.vocabulary
+      : [];
+    applyVocabularyHighlights();
+    if (currentLibraryView === "vocabulary") {
+      renderVocabularyForCurrentFilter();
+    }
+  } catch (error) {
+    if (generation !== vocabularyLoadGeneration) return;
+    console.error("[YouTube Digest Panel] Load vocabulary error:", error);
+  }
+}
+
+function renderVocabularyForCurrentFilter() {
+  const entries = showAllVocabulary
+    ? vocabularyEntries
+    : vocabularyEntries.filter((entry) => entry.videoId === currentVideoId);
+  renderVocabulary(entries, showAllVocabulary ? null : currentVideoId);
+}
+
+function getSafeHttpUrl(value) {
+  try {
+    const url = new URL(String(value || ""));
+    return url.protocol === "https:" || url.protocol === "http:"
+      ? url.href
+      : "";
+  } catch {
+    return "";
+  }
+}
+
+function resolveVocabularySpeechLanguage(term, sourceLanguage) {
+  const spokenTerm = typeof term === "string" ? term.trim() : "";
+  if (!spokenTerm) return "";
+
+  if (sourceLanguage === "zh") return "zh-CN";
+  if (sourceLanguage === "ja") return "ja-JP";
+  if (sourceLanguage === "ko") return "ko-KR";
+  if (/[\u3040-\u30ff]/u.test(spokenTerm)) return "ja-JP";
+  if (/[\uac00-\ud7af]/u.test(spokenTerm)) return "ko-KR";
+  if (/[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/u.test(spokenTerm)) {
+    return "zh-CN";
+  }
+
+  const letters = Array.from(spokenTerm).filter((character) =>
+    /\p{L}/u.test(character),
+  );
+  const isLatin =
+    letters.length > 0 &&
+    letters.every((character) => /\p{Script=Latin}/u.test(character));
+  return isLatin ? "en-US" : "";
+}
+
+function selectPreferredSpeechVoice(voices, targetLanguage) {
+  const normalizeLanguage = (value) =>
+    typeof value === "string"
+      ? value.trim().replaceAll("_", "-").toLocaleLowerCase("en-US")
+      : "";
+  const target = normalizeLanguage(targetLanguage);
+  if (!target || !Array.isArray(voices)) return null;
+  const targetBase = target.split("-")[0];
+  const candidates = voices.filter(
+    (voice) => voice && normalizeLanguage(voice.lang),
+  );
+  const exact = (voice) => normalizeLanguage(voice.lang) === target;
+  const baseMatch = (voice) =>
+    normalizeLanguage(voice.lang).split("-")[0] === targetBase;
+  if (targetBase === "en") {
+    const samanthaVoice = candidates.find(
+      (voice) =>
+        voice.localService === true &&
+        normalizeLanguage(voice.lang) === "en-us" &&
+        String(voice.name || "").trim().toLocaleLowerCase("en-US") ===
+          "samantha",
+    );
+    if (samanthaVoice) return samanthaVoice;
+  }
+
+  return (
+    candidates.find(
+      (voice) => voice.default && voice.localService && exact(voice),
+    ) ||
+    candidates.find((voice) => voice.localService && exact(voice)) ||
+    candidates.find((voice) => voice.localService && baseMatch(voice)) ||
+    candidates.find(
+      (voice) => voice.default && (exact(voice) || baseMatch(voice)),
+    ) ||
+    candidates.find(exact) ||
+    candidates.find(baseMatch) ||
+    null
+  );
+}
+
+function speakVocabularyTerm(
+  term,
+  sourceLanguage,
+  speechSynthesis,
+  UtteranceCtor,
+) {
+  const spokenTerm = typeof term === "string" ? term.trim() : "";
+  const speechLanguage = resolveVocabularySpeechLanguage(
+    spokenTerm,
+    sourceLanguage,
+  );
+  if (
+    !spokenTerm ||
+    !speechLanguage ||
+    !speechSynthesis ||
+    typeof speechSynthesis.cancel !== "function" ||
+    typeof speechSynthesis.speak !== "function" ||
+    typeof UtteranceCtor !== "function"
+  ) {
+    return false;
+  }
+
+  try {
+    const utterance = new UtteranceCtor(spokenTerm);
+    let voices = [];
+    if (typeof speechSynthesis.getVoices === "function") {
+      try {
+        voices = speechSynthesis.getVoices();
+      } catch {
+        voices = [];
+      }
+    }
+    const preferredVoice = selectPreferredSpeechVoice(voices, speechLanguage);
+    if (preferredVoice) {
+      utterance.voice = preferredVoice;
+      utterance.lang = preferredVoice.lang;
+    } else {
+      utterance.lang = speechLanguage;
+    }
+    speechSynthesis.cancel();
+    speechSynthesis.speak(utterance);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function getVocabularySpeechServices() {
+  const speechSynthesis =
+    typeof window !== "undefined" ? window.speechSynthesis : null;
+  const UtteranceCtor =
+    typeof SpeechSynthesisUtterance === "function"
+      ? SpeechSynthesisUtterance
+      : typeof window !== "undefined" &&
+          typeof window.SpeechSynthesisUtterance === "function"
+        ? window.SpeechSynthesisUtterance
+        : null;
+  return {
+    speechSynthesis,
+    UtteranceCtor,
+    available: Boolean(
+      speechSynthesis &&
+        typeof speechSynthesis.cancel === "function" &&
+        typeof speechSynthesis.speak === "function" &&
+        typeof UtteranceCtor === "function",
+    ),
+  };
+}
+
+function createVocabularySpeakerIcon() {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("width", "16");
+  svg.setAttribute("height", "16");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("stroke-width", "1.8");
+  svg.setAttribute("stroke-linecap", "round");
+  svg.setAttribute("stroke-linejoin", "round");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("focusable", "false");
+  svg.classList.add("vocabulary-speaker-icon");
+
+  const speaker = document.createElementNS(
+    "http://www.w3.org/2000/svg",
+    "path",
+  );
+  speaker.setAttribute("d", "M11 5 6.5 9H3v6h3.5l4.5 4V5Z");
+  const wave = document.createElementNS(
+    "http://www.w3.org/2000/svg",
+    "path",
+  );
+  wave.setAttribute("d", "M15.5 8.5a5 5 0 0 1 0 7");
+  svg.append(speaker, wave);
+  return svg;
+}
+
+function openVocabularyTimestamp(entry, safeUrl) {
+  if (!safeUrl) return;
+  if (entry.videoId === currentVideoId) {
+    seekTo(Number(entry.timestampSeconds) || 0);
+    return;
+  }
+  chrome.tabs.create({ url: safeUrl });
+}
+
+function renderVocabulary(entries, filteredVideoId) {
+  const vocabularyList = document.getElementById("vocabularyList");
+  const vocabularyIntro = document.getElementById("vocabularyIntro");
+  if (!vocabularyList || !vocabularyIntro) return;
+  vocabularyList.replaceChildren();
+
+  if (!Array.isArray(entries) || entries.length === 0) {
+    vocabularyIntro.hidden = false;
+    vocabularyIntro.textContent = filteredVideoId
+      ? "No vocabulary saved from this video yet. Select transcript text and choose Save."
+      : "No vocabulary saved yet. Select transcript text and choose Save.";
+    return;
+  }
+
+  vocabularyIntro.hidden = true;
+  const speechServices = getVocabularySpeechServices();
+  entries.forEach((entry) => {
+    const card = document.createElement("article");
+    card.className = "vocabulary-item";
+
+    const header = document.createElement("div");
+    header.className = "vocabulary-item-header";
+    const termBlock = document.createElement("div");
+    termBlock.className = "vocabulary-term-block";
+    const term = document.createElement("div");
+    term.className = "vocabulary-term";
+    term.textContent = String(entry.term || "");
+    termBlock.appendChild(term);
+    const phoneticText = String(entry.phonetic || "").trim();
+    if (phoneticText) {
+      const phonetic = document.createElement("div");
+      phonetic.className = "vocabulary-phonetic";
+      phonetic.textContent = phoneticText;
+      termBlock.appendChild(phonetic);
+    }
+
+    const headerActions = document.createElement("div");
+    headerActions.className = "vocabulary-item-actions";
+    const termLabel = String(entry.term || "vocabulary");
+    const speechLanguage = resolveVocabularySpeechLanguage(
+      termLabel,
+      String(entry.sourceLanguage || ""),
+    );
+    let pronunciationControl;
+    if (speechServices.available && speechLanguage) {
+      const pronunciationButton = document.createElement("button");
+      pronunciationButton.className = "vocabulary-pronunciation";
+      pronunciationButton.type = "button";
+      pronunciationButton.appendChild(createVocabularySpeakerIcon());
+      pronunciationButton.title = `Pronounce ${termLabel}`;
+      pronunciationButton.setAttribute("aria-label", `Pronounce ${termLabel}`);
+      pronunciationButton.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        speakVocabularyTerm(
+          termLabel,
+          String(entry.sourceLanguage || ""),
+          speechServices.speechSynthesis,
+          speechServices.UtteranceCtor,
+        );
+      });
+      pronunciationControl = pronunciationButton;
+    } else {
+      const unavailable = document.createElement("span");
+      unavailable.className = "vocabulary-pronunciation-unavailable";
+      unavailable.textContent = "Pronunciation unavailable";
+      unavailable.setAttribute("role", "note");
+      unavailable.setAttribute(
+        "aria-label",
+        `Pronunciation unavailable for ${termLabel}`,
+      );
+      pronunciationControl = unavailable;
+    }
+    const deleteButton = document.createElement("button");
+    deleteButton.className = "vocabulary-delete";
+    deleteButton.type = "button";
+    deleteButton.title = "Delete vocabulary";
+    deleteButton.setAttribute("aria-label", `Delete ${String(entry.term || "vocabulary")}`);
+    deleteButton.textContent = "✕";
+    deleteButton.addEventListener("click", () =>
+      deleteVocabularyEntry(String(entry.id || "")),
+    );
+    headerActions.append(pronunciationControl, deleteButton);
+    header.append(termBlock, headerActions);
+
+    const meaning = document.createElement("div");
+    meaning.className = "vocabulary-meaning";
+    meaning.textContent = String(entry.meaningZh || "");
+    const explanation = document.createElement("div");
+    explanation.className = "vocabulary-explanation";
+    explanation.textContent = String(entry.explanationZh || "");
+    const excerpt = document.createElement("blockquote");
+    excerpt.className = "vocabulary-excerpt";
+    excerpt.textContent = String(entry.sourceExcerpt || "");
+
+    const footer = document.createElement("div");
+    footer.className = "vocabulary-item-footer";
+    const safeUrl = getSafeHttpUrl(entry.timestampedUrl);
+    const timestampButton = document.createElement("button");
+    timestampButton.className = "vocabulary-timestamp";
+    timestampButton.type = "button";
+    timestampButton.textContent = String(entry.timestamp || "0:00");
+    if (safeUrl) {
+      timestampButton.addEventListener("click", () =>
+        openVocabularyTimestamp(entry, safeUrl),
+      );
+    } else {
+      timestampButton.disabled = true;
+      timestampButton.title = "Timestamp unavailable";
+    }
+    footer.appendChild(timestampButton);
+
+    if (!filteredVideoId) {
+      const videoTitle = document.createElement("span");
+      videoTitle.className = "vocabulary-video-title";
+      videoTitle.textContent = String(entry.videoTitle || "Untitled video");
+      footer.appendChild(videoTitle);
+    }
+
+    card.append(header, meaning, explanation, excerpt, footer);
+    vocabularyList.appendChild(card);
+  });
+}
+
+async function deleteVocabularyEntry(entryId) {
+  if (!entryId) return;
+  try {
+    const result = await chrome.runtime.sendMessage({
+      action: "deleteVocabulary",
+      vocabularyId: entryId,
+    });
+    if (!result?.success) {
+      throw new Error(result?.message || result?.error || "Delete failed");
+    }
+    await refreshVocabularyEntries();
+  } catch (error) {
+    console.error("[YouTube Digest Panel] Delete vocabulary error:", error);
+  }
+}
+
+function buildNormalizedVocabularyText(value, maxLength) {
+  const source = String(value || "").slice(0, maxLength);
+  let text = "";
+  const starts = [];
+  const ends = [];
+  let pendingWhitespace = null;
+
+  for (let sourceIndex = 0; sourceIndex < source.length;) {
+    const codePoint = source.codePointAt(sourceIndex);
+    const sourceCharacter = String.fromCodePoint(codePoint);
+    const sourceEnd = sourceIndex + sourceCharacter.length;
+    const normalizedPiece = sourceCharacter.normalize("NFKC").toLocaleLowerCase();
+
+    for (const character of normalizedPiece) {
+      if (/\s/u.test(character)) {
+        if (text && !pendingWhitespace) {
+          pendingWhitespace = { start: sourceIndex, end: sourceEnd };
+        } else if (pendingWhitespace) {
+          pendingWhitespace.end = sourceEnd;
+        }
+        continue;
+      }
+
+      if (pendingWhitespace) {
+        text += " ";
+        starts.push(pendingWhitespace.start);
+        ends.push(pendingWhitespace.end);
+        pendingWhitespace = null;
+      }
+      for (let index = 0; index < character.length; index += 1) {
+        text += character[index];
+        starts.push(sourceIndex);
+        ends.push(sourceEnd);
+      }
+    }
+    sourceIndex = sourceEnd;
+  }
+
+  return { source, text, starts, ends };
+}
+
+function isLatinWordCharacter(character) {
+  return Boolean(character && /[a-z0-9_]/i.test(character));
+}
+
+/**
+ * Plans literal text matches without constructing a RegExp from saved input.
+ * Longer terms claim overlaps first; all work is bounded by fixed limits.
+ */
+function planVocabularyMatches(text, entries) {
+  const normalizedText = buildNormalizedVocabularyText(
+    text,
+    VOCABULARY_MATCH_LIMITS.maxTextLength,
+  );
+  if (!normalizedText.text || !Array.isArray(entries)) return [];
+
+  const seenTerms = new Set();
+  const terms = entries
+    .slice(0, VOCABULARY_MATCH_LIMITS.maxEntries)
+    .map((entry, order) => ({
+      entry,
+      order,
+      term: buildNormalizedVocabularyText(
+        entry?.normalizedTerm || entry?.term,
+        VOCABULARY_MATCH_LIMITS.maxTermLength,
+      ).text,
+    }))
+    .filter((candidate) => {
+      if (!candidate.term || seenTerms.has(candidate.term)) return false;
+      seenTerms.add(candidate.term);
+      return true;
+    })
+    .sort((left, right) =>
+      right.term.length - left.term.length || left.order - right.order,
+    );
+
+  const accepted = [];
+  let candidateCount = 0;
+  for (const candidate of terms) {
+    let fromIndex = 0;
+    let occurrenceCount = 0;
+    const hasLatinWord = /[a-z0-9]/i.test(candidate.term);
+    while (
+      fromIndex <= normalizedText.text.length - candidate.term.length &&
+      candidateCount < 2_000 &&
+      occurrenceCount < 1_000
+    ) {
+      const matchIndex = normalizedText.text.indexOf(candidate.term, fromIndex);
+      if (matchIndex < 0) break;
+      const normalizedEnd = matchIndex + candidate.term.length;
+      fromIndex = matchIndex + Math.max(1, candidate.term.length);
+      occurrenceCount += 1;
+      candidateCount += 1;
+
+      if (
+        hasLatinWord &&
+        (isLatinWordCharacter(normalizedText.text[matchIndex - 1]) ||
+          isLatinWordCharacter(normalizedText.text[normalizedEnd]))
+      ) {
+        continue;
+      }
+
+      const start = normalizedText.starts[matchIndex];
+      const end = normalizedText.ends[normalizedEnd - 1];
+      if (!Number.isInteger(start) || !Number.isInteger(end) || end <= start) {
+        continue;
+      }
+      const overlaps = accepted.some(
+        (match) => start < match.end && end > match.start,
+      );
+      if (overlaps) continue;
+      accepted.push({
+        start,
+        end,
+        entryId: String(candidate.entry?.id || ""),
+        term: String(candidate.entry?.term || candidate.term),
+        text: normalizedText.source.slice(start, end),
+      });
+    }
+    if (candidateCount >= 2_000) break;
+  }
+
+  return accepted.sort((left, right) => left.start - right.start);
+}
+
+function clearVocabularyHighlights(root = document.getElementById("transcriptList")) {
+  if (!root) return;
+  root.querySelectorAll("mark.vocabulary-highlight").forEach((mark) => {
+    const textNode = document.createTextNode(mark.textContent || "");
+    const parent = mark.parentNode;
+    mark.replaceWith(textNode);
+    parent?.normalize();
+  });
+}
+
+function applyVocabularyHighlights(root = document.getElementById("transcriptList")) {
+  if (!root) return;
+  clearVocabularyHighlights(root);
+  if (!vocabularyEntries.length) return;
+
+  const walker = document.createTreeWalker(
+    root,
+    NodeFilter.SHOW_TEXT,
+    {
+      acceptNode(node) {
+        const parent = node.parentElement;
+        if (!parent || !node.nodeValue?.trim()) return NodeFilter.FILTER_REJECT;
+        if (parent.closest(".vocabulary-highlight, .transcript-time, button, a")) {
+          return NodeFilter.FILTER_REJECT;
+        }
+        if (parent.closest(".translation-pending, .translation-error")) {
+          return NodeFilter.FILTER_REJECT;
+        }
+        return parent.closest(".transcript-entry")
+          ? NodeFilter.FILTER_ACCEPT
+          : NodeFilter.FILTER_REJECT;
+      },
+    },
+  );
+  const textNodes = [];
+  while (walker.nextNode()) textNodes.push(walker.currentNode);
+
+  textNodes.forEach((textNode) => {
+    const sourceText = textNode.nodeValue || "";
+    const matches = planVocabularyMatches(sourceText, vocabularyEntries);
+    if (!matches.length) return;
+    const fragment = document.createDocumentFragment();
+    let cursor = 0;
+    matches.forEach((match) => {
+      if (match.start > cursor) {
+        fragment.appendChild(
+          document.createTextNode(sourceText.slice(cursor, match.start)),
+        );
+      }
+      const mark = document.createElement("mark");
+      mark.className = "vocabulary-highlight";
+      mark.dataset.vocabularyId = match.entryId;
+      mark.textContent = sourceText.slice(match.start, match.end);
+      fragment.appendChild(mark);
+      cursor = match.end;
+    });
+    if (cursor < sourceText.length) {
+      fragment.appendChild(document.createTextNode(sourceText.slice(cursor)));
+    }
+    textNode.replaceWith(fragment);
+  });
+}
+
+// ============================================================
 // CACHING
 // ============================================================
 
@@ -1338,8 +3442,22 @@ function getTranscriptContext(selectedText) {
  * without consuming API tokens or Supadata calls.
  * Cache expires after 30 days. Oldest entries evicted when > 20 videos cached.
  */
-async function saveToCache(videoId) {
-  if (!videoId || !currentTranscript) return;
+function isCurrentCacheRequest(requestSnapshot) {
+  if (!requestSnapshot) return true;
+  return "analysisGeneration" in requestSnapshot
+    ? isCurrentAnalysisRequest(requestSnapshot)
+    : isCurrentDigestRequest(requestSnapshot);
+}
+
+async function saveToCache(videoId, requestSnapshot = null) {
+  if (
+    !videoId ||
+    videoId !== currentVideoId ||
+    !currentTranscript ||
+    !isCurrentCacheRequest(requestSnapshot)
+  ) {
+    return;
+  }
 
   try {
     // Persist semantic-segment translations for this video.
@@ -1356,13 +3474,21 @@ async function saveToCache(videoId) {
       transcriptText: currentTranscriptText,
       transcriptTimestamped: currentTranscriptTimestamped,
       transcriptLanguage: currentTranscriptLanguage,
+      transcriptSource: currentTranscriptSource,
       videoTitle: currentVideoTitle,
       channelName: currentChannelName,
       paragraphCache: paragraphCacheForVideo,
+      askSuggestions:
+        askState.videoId === videoId ? [...askState.suggestions] : [],
+      askSuggestionsContextReduced:
+        askState.videoId === videoId &&
+        askState.suggestionsContextReduced === true,
       timestamp: Date.now(),
     };
 
+    if (!isCurrentCacheRequest(requestSnapshot)) return;
     await chrome.storage.local.set({ [`digest_${videoId}`]: cacheData });
+    if (!isCurrentCacheRequest(requestSnapshot)) return;
     debugLog(
       "Saved to cache:",
       videoId,
@@ -1422,11 +3548,12 @@ async function evictOldCacheEntries(maxEntries) {
  * Loads digest results from persistent local storage.
  * Returns null if not cached or expired (30-day expiry).
  */
-async function loadFromCache(videoId) {
+async function loadFromCache(videoId, requestSnapshot = null) {
   if (!videoId) return null;
 
   try {
     const result = await chrome.storage.local.get(`digest_${videoId}`);
+    if (requestSnapshot && !isCurrentDigestRequest(requestSnapshot)) return null;
     const cached = result[`digest_${videoId}`];
 
     if (!cached) return null;
@@ -1462,12 +3589,14 @@ async function updateCache() {
  * Loads and renders notes from storage.
  * @param {string|null} videoId - Filter by video ID, or null for all notes
  */
-async function loadNotes(videoId) {
+async function loadNotes(videoId, requestSnapshot = null) {
   try {
     const result = await chrome.runtime.sendMessage({
       action: "getNotes",
       videoId: videoId,
     });
+
+    if (requestSnapshot && !isCurrentDigestRequest(requestSnapshot)) return;
 
     if (result.success) {
       renderNotes(result.notes, videoId);
@@ -1734,6 +3863,161 @@ function onContentAreaScroll() {
 }
 
 // ============================================================
+// OVERVIEW MODE UI — Original / Chinese / aligned bilingual
+// ============================================================
+
+function overviewTranslationCacheKey(fieldId) {
+  return `${currentVideoId}:zh:overview:${fieldId}`;
+}
+
+function getOverviewTranslation(fieldId) {
+  return transcriptParagraphCache.get(overviewTranslationCacheKey(fieldId)) || "";
+}
+
+function getOverviewFieldDisplayText(sourceText, fieldId) {
+  const source = String(sourceText || "").trim();
+  const translated = getOverviewTranslation(fieldId);
+  if (currentOverviewMode === "zh") return translated || source;
+  if (currentOverviewMode === "bilingual" && translated) {
+    return `${source}\n\n${translated}`;
+  }
+  return source;
+}
+
+function renderOverviewField(sourceText, fieldId) {
+  const source = String(sourceText || "").trim();
+  if (currentOverviewMode === "original") return escapeHtml(source);
+
+  const translated = getOverviewTranslation(fieldId);
+  const error = overviewTranslationErrors.get(overviewTranslationCacheKey(fieldId));
+  const translatedText = translated || error || "Waiting for translation…";
+  const stateClass = translated
+    ? ""
+    : error
+      ? "translation-error"
+      : "translation-pending";
+  const translationHtml = `<span class="overview-translation ${stateClass}">${escapeHtml(translatedText)}</span>`;
+
+  if (currentOverviewMode === "bilingual") {
+    return `<span class="overview-original">${escapeHtml(source)}</span>${translationHtml}`;
+  }
+  return translationHtml;
+}
+
+function getOverviewTranslationSegments(analysis) {
+  const segments = [];
+  const add = (id, text) => {
+    const normalized = String(text || "").trim();
+    if (normalized) segments.push({ id, text: normalized });
+  };
+
+  add("overview-summary", analysis?.summary);
+  (analysis?.chapters || []).forEach((chapter, index) => {
+    add(`chapter-title-${index}`, chapter.title);
+    add(`chapter-summary-${index}`, chapter.summary);
+  });
+  (analysis?.keyQuotes || []).forEach((quote, index) => {
+    add(`quote-${index}`, quote.quote);
+  });
+  return segments;
+}
+
+function setOverviewModeButtons(mode) {
+  document.querySelectorAll("[data-overview-mode]").forEach((button) => {
+    const active = button.dataset.overviewMode === mode;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+}
+
+function setOverviewTranslatingSpinner(show) {
+  if (show) overviewTranslationWorkCount += 1;
+  else overviewTranslationWorkCount = Math.max(0, overviewTranslationWorkCount - 1);
+  document
+    .getElementById("overviewLangSpinner")
+    ?.classList.toggle("visible", overviewTranslationWorkCount > 0);
+}
+
+async function handleOverviewModeChange(mode) {
+  if (!["original", "zh", "bilingual"].includes(mode)) return;
+  if (mode === currentOverviewMode) return;
+
+  currentOverviewMode = mode;
+  overviewTranslationGeneration += 1;
+  overviewTranslationWorkCount = 0;
+  setOverviewTranslatingSpinner(false);
+  setOverviewModeButtons(mode);
+  if (currentAnalysis) renderAnalysisResults(currentAnalysis);
+  if (mode !== "original") await translateOverview();
+}
+
+async function translateOverview() {
+  if (!currentAnalysis || currentOverviewMode === "original") return;
+
+  overviewTranslationGeneration += 1;
+  const generation = overviewTranslationGeneration;
+  const videoId = currentVideoId;
+  const segments = getOverviewTranslationSegments(currentAnalysis).filter(
+    (segment) => !getOverviewTranslation(segment.id),
+  );
+  if (!segments.length) {
+    renderAnalysisResults(currentAnalysis);
+    return;
+  }
+
+  setOverviewTranslatingSpinner(true);
+  try {
+    for (let index = 0; index < segments.length; index += 4) {
+      const batch = segments.slice(index, index + 4);
+      const result = await sendTranslationMessage({
+        action: "translateContent",
+        content: { segments: batch },
+        contentType: "overviewBatch",
+        targetLanguage: "zh",
+        videoTitle: currentVideoTitle,
+      });
+      if (
+        generation !== overviewTranslationGeneration ||
+        videoId !== currentVideoId ||
+        currentOverviewMode === "original"
+      ) {
+        return;
+      }
+
+      const aligned = alignTranslatedSegmentBatch(
+        batch,
+        result?.success ? result.translatedContent?.segments : [],
+      );
+      aligned.forEach((item) => {
+        const key = overviewTranslationCacheKey(item.id);
+        if (item.text) {
+          transcriptParagraphCache.set(key, item.text);
+          overviewTranslationErrors.delete(key);
+        } else {
+          overviewTranslationErrors.set(
+            key,
+            result?.error || item.error || "Translation unavailable.",
+          );
+        }
+      });
+      renderAnalysisResults(currentAnalysis);
+    }
+    await updateCache();
+  } catch (error) {
+    if (generation !== overviewTranslationGeneration) return;
+    segments.forEach((segment) => {
+      overviewTranslationErrors.set(
+        overviewTranslationCacheKey(segment.id),
+        error.message || "Translation failed.",
+      );
+    });
+    renderAnalysisResults(currentAnalysis);
+  } finally {
+    setOverviewTranslatingSpinner(false);
+  }
+}
+
+// ============================================================
 // TRANSCRIPT MODE UI — Original / Chinese / aligned bilingual
 // ============================================================
 
@@ -1753,7 +4037,7 @@ function transcriptTranslationCacheKey(segment) {
 }
 
 function setTranscriptModeButtons(mode) {
-  document.querySelectorAll(".transcript-mode-btn").forEach((button) => {
+  document.querySelectorAll("[data-transcript-mode]").forEach((button) => {
     const active = button.dataset.transcriptMode === mode;
     button.classList.toggle("active", active);
     button.setAttribute("aria-pressed", String(active));
@@ -1813,7 +4097,7 @@ function renderTranscriptModeRows(segments, mode) {
     mode === "bilingual"
       ? `${originalLabel} + 简体中文`
       : `简体中文 · translated from ${originalLabel}`;
-  badge.innerHTML = `<span class="source-dot source-dot--subs"></span> From video subtitles · ${modeLabel}`;
+  badge.innerHTML = renderTranscriptSourceBadge(modeLabel);
   transcriptList.parentElement.insertBefore(badge, transcriptList);
 
   const rows = [];
@@ -1834,6 +4118,7 @@ function renderTranscriptModeRows(segments, mode) {
       <span class="transcript-time">${timestamp}</span>
       ${renderTranscriptSegmentContent(segment, mode, cached, "")}
     `;
+    addTranscriptRowActions(div, segment);
     div.addEventListener("click", (event) =>
       seekFromTranscriptEntryClick(event, segment.start),
     );
@@ -1841,6 +4126,7 @@ function renderTranscriptModeRows(segments, mode) {
     rows.push(div);
   });
 
+  applyVocabularyHighlights(transcriptList);
   startPlaybackTracking();
   return rows;
 }
@@ -1910,6 +4196,9 @@ function updateTranslatedRow(segment, index, alignedItem, generation) {
       retryTranslationSegment(index, generation);
     });
   }
+
+  applyVocabularyHighlights(row);
+  syncTranscriptRowActions(row);
 }
 
 let activeTranslationQueue = null;
@@ -1984,6 +4273,7 @@ function retryTranslationSegment(index, generation) {
       translation.className = "transcript-translation translation-pending";
       translation.textContent = "Retrying…";
     }
+    syncTranscriptRowActions(row);
   }
   activeTranslationQueue.enqueue(index, true);
 }
@@ -2077,9 +4367,50 @@ function setTranslatingSpinner(show) {
 // not read this object at runtime.
 globalThis.__YTD_TRANSCRIPT_TESTING__ = {
   sendTranslationMessage,
+  createExplanationTranslationState,
+  ensureExplanationTranslation,
+  renderExplanationContent,
+  buildExplainContextFromSelection,
   groupTranscriptEntries,
   splitOversizedThought,
   alignTranslatedSegmentBatch,
   renderSubtitleInlineMarkup,
   renderTranscriptSegmentContent,
+  getOverviewTranslationSegments,
+  buildAudioTranscriptionConfirmation,
+};
+
+globalThis.__YTD_ASK_UI_TESTING__ = {
+  createAskState,
+  resetAskStateForVideo,
+  shouldLoadAskSuggestions,
+  beginAskRequest,
+  applyAskRequestResult,
+  buildAskRequestPayload,
+  resolveAskChipAction,
+  isCurrentAskSnapshot,
+  normalizeAskAssistantResult,
+};
+
+globalThis.__YTD_VOCABULARY_UI_TESTING__ = {
+  buildVocabularySelectionMetadata,
+  buildVocabularySaveMessage,
+  planVocabularyMatches,
+  getSafeHttpUrl,
+  resolveVocabularySpeechLanguage,
+  selectPreferredSpeechVoice,
+  speakVocabularyTerm,
+};
+
+globalThis.__YTD_RACE_TESTING__ = {
+  startDigest,
+  triggerAnalysis,
+  getRaceState: () => ({
+    currentVideoId,
+    currentTranscriptText,
+    currentAnalysis,
+    isAnalysisLoading,
+    digestGeneration,
+    analysisGeneration,
+  }),
 };

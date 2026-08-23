@@ -25,12 +25,16 @@ There is no guaranteed response time or bug-bounty program. Please allow a reaso
 Examples include:
 
 - API keys or private content included in source, logs, screenshots, or release ZIPs;
-- requests to network origins outside the documented YouTube, Supadata, and DeepSeek hosts;
+- requests to network origins outside the documented YouTube, Supadata, DeepSeek, and optional Tavily hosts;
 - script or HTML injection through transcript, metadata, service errors, or model output;
 - access to browsing data outside the documented YouTube scope;
 - unintended transmission of notes, transcripts, or credentials;
 - a dependency or release-workflow compromise; and
 - bypasses of local data deletion or DeepSeek configuration controls.
+
+Transcript text, video metadata, web results, and model output are untrusted data. Provider output must not be treated as instructions or executable markup. Tavily source URLs must be validated source URLs before rendering; all displayed text must be escaped, and transcript, conversation, search, storage, and rendering work must remain bounded.
+
+Vocabulary speech is local and sends no audio to any provider. The installed Chrome or system voice may vary, but speech playback must not add a remote audio dependency without an explicit privacy and permission review.
 
 ## User security guidance
 
@@ -39,6 +43,6 @@ Examples include:
 - Use dedicated, scoped API keys where possible and set provider spending limits.
 - Do not reuse keys from production systems.
 - Revoke keys immediately if a device, browser profile, ZIP, log, or screenshot exposes them.
-- Remember that Chrome local extension storage is not an encrypted password vault.
+- Remember that API keys are kept in Chrome local extension storage, which is not an encrypted password vault.
 
 The release tooling uses an explicit file allowlist and scans public files for common credential patterns, but automated checks cannot detect every secret.

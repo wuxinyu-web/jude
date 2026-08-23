@@ -32,7 +32,8 @@
       <div class="tabs" id="tabsNav" style="display: none">
         <button class="tab active" data-tab="transcript">Transcript</button>
         <button class="tab" data-tab="overview">Overview</button>
-        <button class="tab" data-tab="notes">Notes</button>
+        <button class="tab" data-tab="library">Library</button>
+        <button class="tab" data-tab="ask">Ask</button>
       </div>
     </div>
 
@@ -76,41 +77,37 @@
         <!-- TAB: Transcript (default - no LLM required) -->
         <div class="tab-panel active" data-panel="transcript">
           <div class="section">
-            <div class="section-header transcript-section-header">
-              <div class="transcript-header-main">
-                <div class="section-title-wrap">
-                  <div class="section-title">Full Transcript</div>
-                </div>
-                <div
-                  class="transcript-mode-control"
-                  id="transcriptModeControl"
-                  role="group"
-                  aria-label="Transcript language"
-                >
-                  <button
-                    class="transcript-mode-btn active"
-                    type="button"
-                    data-transcript-mode="original"
-                    aria-pressed="true"
-                  >Original</button>
-                  <button
-                    class="transcript-mode-btn"
-                    type="button"
-                    data-transcript-mode="zh"
-                    aria-pressed="false"
-                  >中文</button>
-                  <button
-                    class="transcript-mode-btn"
-                    type="button"
-                    data-transcript-mode="bilingual"
-                    aria-pressed="false"
-                  >双语</button>
-                  <span
-                    class="translation-spinner"
-                    id="langSpinner"
-                    aria-label="Translating"
-                  ></span>
-                </div>
+            <div class="section-title">Full Transcript</div>
+            <div class="sticky-control-row">
+              <div
+                class="transcript-mode-control"
+                id="transcriptModeControl"
+                role="group"
+                aria-label="Transcript language"
+              >
+                <button
+                  class="transcript-mode-btn active"
+                  type="button"
+                  data-transcript-mode="original"
+                  aria-pressed="true"
+                >Original</button>
+                <button
+                  class="transcript-mode-btn"
+                  type="button"
+                  data-transcript-mode="zh"
+                  aria-pressed="false"
+                >中文</button>
+                <button
+                  class="transcript-mode-btn"
+                  type="button"
+                  data-transcript-mode="bilingual"
+                  aria-pressed="false"
+                >双语</button>
+                <span
+                  class="translation-spinner"
+                  id="langSpinner"
+                  aria-label="Translating"
+                ></span>
               </div>
               <div class="transcript-actions">
                 <button class="enhance-btn" id="copyTranscriptBtn">Copy</button>
@@ -125,6 +122,49 @@
 
         <!-- TAB: Overview (chapters + key quotes) - requires LLM -->
         <div class="tab-panel" data-panel="overview">
+          <div class="sticky-control-row overview-control-row">
+            <div
+              class="transcript-mode-control"
+              id="overviewModeControl"
+              role="group"
+              aria-label="Overview language"
+            >
+              <button
+                class="transcript-mode-btn active"
+                type="button"
+                data-overview-mode="original"
+                aria-pressed="true"
+              >Original</button>
+              <button
+                class="transcript-mode-btn"
+                type="button"
+                data-overview-mode="zh"
+                aria-pressed="false"
+              >中文</button>
+              <button
+                class="transcript-mode-btn"
+                type="button"
+                data-overview-mode="bilingual"
+                aria-pressed="false"
+              >双语</button>
+              <span
+                class="translation-spinner"
+                id="overviewLangSpinner"
+                aria-label="Translating overview"
+              ></span>
+            </div>
+          </div>
+
+          <!-- Full-video summary -->
+          <div class="section overview-summary-section">
+            <div class="section-title">Summary</div>
+            <div class="summary-box">
+              <div class="summary-text" id="overviewSummary">
+                A concise summary will appear here
+              </div>
+            </div>
+          </div>
+
           <!-- Chapters -->
           <div class="section">
             <div class="section-title">Chapters</div>
@@ -162,35 +202,172 @@
           </div>
         </div>
 
-        <!-- TAB: Notes -->
-        <div class="tab-panel" data-panel="notes">
-          <div class="section">
-            <div class="section-header">
-              <div class="section-title">Saved Notes</div>
-              <div class="notes-filter">
-                <button
-                  class="enhance-btn active"
-                  id="notesFilterThis"
-                  aria-pressed="true"
-                >
-                  This Video
-                </button>
-                <button
-                  class="enhance-btn"
-                  id="notesFilterAll"
-                  aria-pressed="false"
-                >
-                  All Notes
-                </button>
-              </div>
-            </div>
-            <p class="notes-intro" id="notesIntro">
-              Move your mouse over the video and click the 📝 Note button to
-              save timestamped notes, or press the "n" key while the video is
-              focused.
-            </p>
-            <div id="notesList"></div>
+        <!-- TAB: Library (notes + vocabulary) -->
+        <div class="tab-panel" data-panel="library">
+          <div class="library-switch" role="group" aria-label="Library section">
+            <button
+              class="library-switch-btn active"
+              id="libraryNotesTab"
+              type="button"
+              aria-pressed="true"
+              aria-controls="libraryNotesView"
+            >Notes</button>
+            <button
+              class="library-switch-btn"
+              id="libraryVocabularyTab"
+              type="button"
+              aria-pressed="false"
+              aria-controls="libraryVocabularyView"
+            >Vocabulary</button>
           </div>
+
+          <div class="library-view" id="libraryNotesView">
+            <div class="section">
+              <div class="section-header">
+                <div class="section-title">Saved Notes</div>
+                <div class="notes-filter">
+                  <button
+                    class="enhance-btn active"
+                    id="notesFilterThis"
+                    aria-pressed="true"
+                  >
+                    This Video
+                  </button>
+                  <button
+                    class="enhance-btn"
+                    id="notesFilterAll"
+                    aria-pressed="false"
+                  >
+                    All Notes
+                  </button>
+                </div>
+              </div>
+              <p class="notes-intro" id="notesIntro">
+                Move your mouse over the video and click the 📝 Note button to
+                save timestamped notes, or press the "n" key while the video is
+                focused.
+              </p>
+              <div id="notesList"></div>
+            </div>
+          </div>
+
+          <div
+            class="library-view"
+            id="libraryVocabularyView"
+            hidden
+          >
+            <div class="section">
+              <div class="section-header vocabulary-header">
+                <div class="section-title">Vocabulary</div>
+                <div class="vocabulary-filter">
+                  <button
+                    class="enhance-btn active"
+                    id="vocabularyFilterThis"
+                    type="button"
+                    aria-pressed="true"
+                  >
+                    This Video
+                  </button>
+                  <button
+                    class="enhance-btn"
+                    id="vocabularyFilterAll"
+                    type="button"
+                    aria-pressed="false"
+                  >
+                    All Vocabulary
+                  </button>
+                </div>
+              </div>
+              <p class="notes-intro" id="vocabularyIntro">
+                Select a word, phrase, or sentence in the transcript, then
+                choose Save to build your vocabulary.
+              </p>
+              <div id="vocabularyList"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB: Ask (session-only video conversation) -->
+        <div class="tab-panel ask-panel" data-panel="ask">
+          <div class="ask-heading">
+            <div class="section-title" id="askTitle">Ask about this video</div>
+            <p class="ask-intro">
+              Answers use this video's transcript. The conversation clears when
+              you switch videos or close the panel.
+            </p>
+          </div>
+
+          <div class="ask-scroll-region" id="askScrollRegion">
+          <div class="ask-suggestions" aria-labelledby="askQuickQuestionsLabel">
+            <div class="ask-suggestions-label" id="askQuickQuestionsLabel">
+              Try asking
+            </div>
+            <div class="ask-chip-list">
+              <button
+                class="ask-chip"
+                type="button"
+                data-ask-question="总结视频"
+              >总结视频</button>
+              <button
+                class="ask-chip"
+                type="button"
+                data-ask-question="推荐相关内容"
+                data-enable-web="true"
+              >推荐相关内容</button>
+              <button
+                class="ask-chip"
+                type="button"
+                data-ask-question="考考我"
+              >考考我</button>
+            </div>
+            <div
+              class="ask-generated-suggestions"
+              id="askGeneratedSuggestions"
+              aria-label="Suggested questions"
+              aria-live="polite"
+            ></div>
+          </div>
+
+          <div
+            class="ask-messages"
+            id="askMessages"
+            aria-label="Conversation"
+          ></div>
+          <div
+            class="sr-only"
+            id="askStatus"
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+          ></div>
+          </div>
+
+          <form class="ask-composer" id="askForm">
+            <label class="sr-only" for="askInput">Ask about this video</label>
+            <textarea
+              class="ask-input"
+              id="askInput"
+              maxlength="2000"
+              rows="2"
+              placeholder="Ask about this video..."
+            ></textarea>
+            <div class="ask-composer-error" id="askComposerError" role="alert"></div>
+            <div class="ask-composer-footer">
+              <label class="ask-web-toggle" for="askWebToggle">
+                <input id="askWebToggle" type="checkbox" />
+                <span aria-hidden="true" class="ask-web-switch"></span>
+                <span>Web</span>
+              </label>
+              <span class="ask-character-count" id="askCharacterCount">0 / 2000</span>
+              <button
+                class="ask-send-btn"
+                id="askSendBtn"
+                type="submit"
+                aria-label="Send question"
+                disabled
+              >Send</button>
+            </div>
+          </form>
         </div>
       </div>
     </div>

@@ -19,6 +19,20 @@ const DEBUG = false;
 const AI_PROVIDER_IDLE_TIMEOUT_MS = 50_000;
 const AI_PROVIDER_HARD_TIMEOUT_MS = 120_000;
 const AI_PROVIDER_MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
+const SUPADATA_REQUEST_TIMEOUT_MS = 30_000;
+const SUPADATA_MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
+const ASK_MAX_QUESTION_CHARS = 2_000;
+const ASK_MAX_HISTORY_CHARS = 12_000;
+const ASK_MAX_HISTORY_ROUNDS = 6;
+const ASK_MAX_TRANSCRIPT_CHARS = 120_000;
+const ASK_MAX_ANSWER_CHARS = 12_000;
+const VOCABULARY_STORAGE_KEY = "ytd_vocabulary";
+const VOCABULARY_MAX_ENTRIES = 500;
+const VOCABULARY_MAX_TERM_CHARS = 1_000;
+const VOCABULARY_MAX_PHONETIC_TERM_CHARS = 80;
+const TAVILY_SEARCH_URL = "https://api.tavily.com/search";
+const TAVILY_SEARCH_TIMEOUT_MS = 15_000;
+const TAVILY_MAX_RESPONSE_BYTES = 512 * 1024;
 const debugLog = (...args) => {
   if (DEBUG) console.log(...args);
 };
@@ -302,7 +316,7 @@ chrome.tabs.onActivated.addListener(async ({ tabId }) => {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // We need to return true to indicate we'll respond asynchronously
   if (message.action === "fetchTranscript") {
-    handleFetchTranscript(message.videoId)
+    handleFetchTranscript(message.videoId, message.mode)
       .then(sendResponse)
       .catch((err) => sendResponse({ error: err.message }));
     return true; // Keep the message channel open for async response
@@ -347,6 +361,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.action === "saveOverviewNote") {
+    handleSaveOverviewNote(message)
+      .then(sendResponse)
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
   if (message.action === "getNotes") {
     // Get all saved notes
     handleGetNotes(message.videoId)
@@ -360,6 +381,45 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     handleDeleteNote(message.noteId)
       .then(sendResponse)
       .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (message.action === "saveVocabulary") {
+    saveVocabulary(message)
+      .then(sendResponse)
+      .catch((err) =>
+        sendResponse({
+          success: false,
+          error: err.code || err.message,
+          message: err.message,
+        }),
+      );
+    return true;
+  }
+
+  if (message.action === "getVocabulary") {
+    getVocabulary(message.videoId)
+      .then(sendResponse)
+      .catch((err) =>
+        sendResponse({
+          success: false,
+          error: err.code || err.message,
+          message: err.message,
+        }),
+      );
+    return true;
+  }
+
+  if (message.action === "deleteVocabulary") {
+    deleteVocabulary(message.vocabularyId)
+      .then(sendResponse)
+      .catch((err) =>
+        sendResponse({
+          success: false,
+          error: err.code || err.message,
+          message: err.message,
+        }),
+      );
     return true;
   }
 
@@ -378,6 +438,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       message.targetLanguage,
       message.videoTitle,
     )
+      .then(sendResponse)
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (message.action === "suggestVideoQuestions") {
+    handleSuggestVideoQuestions(message)
+      .then(sendResponse)
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (message.action === "askVideo") {
+    handleAskVideo(message)
       .then(sendResponse)
       .catch((err) => sendResponse({ success: false, error: err.message }));
     return true;
@@ -587,9 +661,84 @@ async function getPlayerVideoDetails(tabId) {
  * API Docs: https://docs.supadata.ai
  *
  * @param {string} videoId - The YouTube video ID (e.g., "dQw4w9WgXcQ")
+ * @param {string} mode - 'native' by default, or explicit opt-in 'generate'
  * @returns {Object} - { success, transcript, transcriptText, language } or { success: false, error }
  */
-async function handleFetchTranscript(videoId) {
+function normalizeTranscriptMode(mode) {
+  return mode === "generate" ? "generate" : "native";
+}
+
+async function readSupadataJson(response) {
+  let text = "";
+  if (response.body?.getReader) {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let receivedBytes = 0;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunkBytes = value?.byteLength || 0;
+        receivedBytes += chunkBytes;
+        if (receivedBytes > SUPADATA_MAX_RESPONSE_BYTES) {
+          await reader.cancel().catch(() => {});
+          throw new Error("Supadata response is too large");
+        }
+        text += decoder.decode(value, { stream: true });
+      }
+      text += decoder.decode();
+    } catch (error) {
+      if (receivedBytes <= SUPADATA_MAX_RESPONSE_BYTES) {
+        await reader.cancel().catch(() => {});
+      }
+      throw error;
+    }
+  } else if (typeof response.text === "function") {
+    text = await response.text();
+    if (new TextEncoder().encode(text).byteLength > SUPADATA_MAX_RESPONSE_BYTES) {
+      throw new Error("Supadata response is too large");
+    }
+  } else if (typeof response.json === "function") {
+    const value = await response.json();
+    text = JSON.stringify(value);
+    if (new TextEncoder().encode(text).byteLength > SUPADATA_MAX_RESPONSE_BYTES) {
+      throw new Error("Supadata response is too large");
+    }
+  }
+
+  if (!text.trim()) return {};
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    if (!response.ok) return {};
+    throw new Error("Supadata returned invalid JSON");
+  }
+}
+
+async function fetchSupadataJson(url, options = {}) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(
+    () => controller.abort(),
+    SUPADATA_REQUEST_TIMEOUT_MS,
+  );
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    const data = await readSupadataJson(response);
+    return { response, data };
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error("Supadata request timed out after 30 seconds");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function handleFetchTranscript(videoId, mode = "native") {
   try {
     const settings = await getSettings();
     if (!settings.supadataApiKey) {
@@ -603,16 +752,18 @@ async function handleFetchTranscript(videoId) {
     // Share only the canonical watch URL. This strips playlist, referral,
     // timestamp, and other browsing parameters from the active tab URL.
     const canonicalVideoUrl = YTD_SETTINGS.canonicalYouTubeUrl(videoId);
+    const transcriptMode = normalizeTranscriptMode(mode);
     // Using the universal transcript endpoint with text=false to get timestamped chunks
     const apiUrl = new URL("https://api.supadata.ai/v1/transcript");
     apiUrl.searchParams.set("url", canonicalVideoUrl);
     apiUrl.searchParams.set("text", "false"); // Get timestamped chunks, not plain text
     apiUrl.searchParams.set("lang", "en"); // Prefer English
-    // Caption-only product scope: never fall back to paid AI transcription.
-    apiUrl.searchParams.set("mode", "native");
+    // Native remains the default. Paid AI transcription is sent only after an
+    // explicit user confirmation in the side panel.
+    apiUrl.searchParams.set("mode", transcriptMode);
 
     // Make the API request
-    const response = await fetch(apiUrl.toString(), {
+    const { response, data } = await fetchSupadataJson(apiUrl.toString(), {
       method: "GET",
       headers: {
         "x-api-key": settings.supadataApiKey,
@@ -621,9 +772,12 @@ async function handleFetchTranscript(videoId) {
 
     // Handle async jobs (for videos > 20 minutes, Supadata returns a job ID)
     if (response.status === 202) {
-      const jobData = await response.json();
       // Poll for the result
-      return await pollTranscriptJob(jobData.jobId, settings.supadataApiKey);
+      return await pollTranscriptJob(
+        data.jobId,
+        settings.supadataApiKey,
+        transcriptMode,
+      );
     }
 
     if (response.status === 206) {
@@ -635,7 +789,6 @@ async function handleFetchTranscript(videoId) {
     }
 
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
       if (response.status === 401) {
         return {
           success: false,
@@ -659,11 +812,9 @@ async function handleFetchTranscript(videoId) {
         };
       }
       throw new Error(
-        errorData.message || `Supadata API error: ${response.status}`,
+        data.message || `Supadata API error: ${response.status}`,
       );
     }
-
-    const data = await response.json();
 
     // Parse the response into our internal format
     // Supadata returns: { content: [{ text, offset, duration, lang }], lang, availableLangs }
@@ -706,7 +857,10 @@ async function handleFetchTranscript(videoId) {
       return {
         success: false,
         error: "EMPTY_TRANSCRIPT",
-        message: "Supadata returned an empty transcript for this video.",
+        message:
+          transcriptMode === "generate"
+            ? "AI transcription completed, but no speech was detected in this video."
+            : "Supadata returned an empty transcript for this video.",
       };
     }
 
@@ -716,6 +870,7 @@ async function handleFetchTranscript(videoId) {
       transcriptText: transcriptTextPlain.trim(), // For display
       transcriptTextTimestamped: transcriptTextTimestamped.trim(), // For AI
       language: typeof data.lang === "string" ? data.lang : null,
+      source: transcriptMode === "generate" ? "generated" : "native",
     };
   } catch (error) {
     console.error("Transcript fetch error:", error);
@@ -733,15 +888,16 @@ async function handleFetchTranscript(videoId) {
  * @param {string} jobId - The job ID returned by the initial request
  * @returns {Object} - Same format as handleFetchTranscript
  */
-async function pollTranscriptJob(jobId, supadataApiKey) {
-  const maxAttempts = 60; // Max 60 seconds of polling
+async function pollTranscriptJob(jobId, supadataApiKey, mode = "native") {
+  const transcriptMode = normalizeTranscriptMode(mode);
+  const maxAttempts = transcriptMode === "generate" ? 300 : 60;
   const pollInterval = 1000; // Poll every 1 second
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     // Wait before polling
     await new Promise((resolve) => setTimeout(resolve, pollInterval));
 
-    const response = await fetch(
+    const { response, data } = await fetchSupadataJson(
       `https://api.supadata.ai/v1/transcript/${encodeURIComponent(jobId)}`,
       {
         headers: { "x-api-key": supadataApiKey },
@@ -751,8 +907,6 @@ async function pollTranscriptJob(jobId, supadataApiKey) {
     if (!response.ok) {
       throw new Error(`Job polling failed: ${response.status}`);
     }
-
-    const data = await response.json();
 
     if (data.status === "completed") {
       // Parse the completed transcript
@@ -784,12 +938,22 @@ async function pollTranscriptJob(jobId, supadataApiKey) {
         }
       }
 
+      if (transcript.length === 0) {
+        return {
+          success: false,
+          error: "EMPTY_TRANSCRIPT",
+          message:
+            "AI transcription completed, but no speech was detected in this video.",
+        };
+      }
+
       return {
         success: true,
         transcript: transcript,
         transcriptText: transcriptTextPlain.trim(),
         transcriptTextTimestamped: transcriptTextTimestamped.trim(),
         language: typeof data.lang === "string" ? data.lang : null,
+        source: transcriptMode === "generate" ? "generated" : "native",
       };
     }
 
@@ -1000,6 +1164,7 @@ function validateAndFixTimestamps(analysis, maxSeconds) {
     return Math.floor(seconds);
   };
 
+  const summary = safeString(analysis?.summary, 3000);
   const chapters = (Array.isArray(analysis?.chapters) ? analysis.chapters : [])
     .slice(0, 100)
     .map((chapter) => {
@@ -1040,7 +1205,7 @@ function validateAndFixTimestamps(analysis, maxSeconds) {
     .filter((seconds) => seconds !== null)
     .slice(0, 100);
 
-  return { chapters, keyQuotes, keyMoments };
+  return { summary, chapters, keyQuotes, keyMoments };
 }
 
 // ============================================================
@@ -1078,6 +1243,68 @@ async function handleGetVideoInfo(tabId) {
 // ============================================================
 // NOTE MANAGEMENT
 // ============================================================
+
+function buildOverviewQuoteNote(message, timestampedUrl, now = Date.now()) {
+  const noteText =
+    typeof message?.noteText === "string"
+      ? message.noteText.trim().slice(0, 6000)
+      : "";
+  if (!noteText) throw new Error("Overview note text is required");
+
+  const safeTimestamp = Math.max(
+    0,
+    Math.floor(Number(message?.timestamp) || 0),
+  );
+  const minutes = Math.floor(safeTimestamp / 60);
+  const seconds = safeTimestamp % 60;
+  const languageMode = ["original", "zh", "bilingual"].includes(
+    message?.languageMode,
+  )
+    ? message.languageMode
+    : "original";
+
+  return {
+    id: `note_${now}`,
+    videoId: String(message?.videoId || "").slice(0, 100),
+    videoTitle:
+      typeof message?.videoTitle === "string"
+        ? message.videoTitle.slice(0, 500)
+        : "Untitled Video",
+    channelName:
+      typeof message?.channelName === "string"
+        ? message.channelName.slice(0, 300)
+        : "",
+    timestamp: `${minutes}:${String(seconds).padStart(2, "0")}`,
+    timestampSeconds: safeTimestamp,
+    timestampedUrl,
+    text: noteText,
+    rawText:
+      typeof message?.rawText === "string"
+        ? message.rawText.trim().slice(0, 3000)
+        : "",
+    languageMode,
+    createdAt: now,
+  };
+}
+
+/** Saves an Overview quote exactly as it is displayed to the user. */
+async function handleSaveOverviewNote(message) {
+  try {
+    const videoId = String(message?.videoId || "").trim();
+    const safeTimestamp = Math.max(
+      0,
+      Math.floor(Number(message?.timestamp) || 0),
+    );
+    const timestampedUrl = `${YTD_SETTINGS.canonicalYouTubeUrl(videoId)}&t=${safeTimestamp}s`;
+    const note = buildOverviewQuoteNote(message, timestampedUrl);
+    await saveNoteToStorage(note);
+    chrome.runtime.sendMessage({ action: "noteSaved", note }).catch(() => {});
+    return { success: true, note };
+  } catch (error) {
+    console.error("[YouTube Digest] Save Overview note error:", error);
+    return { success: false, error: error.message };
+  }
+}
 
 /**
  * Saves a note at the current timestamp.
@@ -1215,6 +1442,7 @@ async function handleSaveNote(
       timestampedUrl: timestampedUrl,
       text: cleanedText,
       rawText: matchedLine.text,
+      languageMode: "original",
       createdAt: Date.now(),
     };
 
@@ -1360,6 +1588,462 @@ async function handleDeleteNote(noteId) {
   }
 }
 
+// ============================================================
+// VOCABULARY MANAGEMENT
+// ============================================================
+
+function vocabularyError(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
+function detectVocabularySourceLanguage(term) {
+  const hasJapanese = /[\u3040-\u30ff]/u.test(term);
+  const hasKorean = /[\uac00-\ud7af]/u.test(term);
+  const hasHan = /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/u.test(term);
+  if (hasJapanese) return "ja";
+  if (hasKorean) return "ko";
+  if (hasHan) return "zh";
+
+  const letters = Array.from(term).filter((character) => /\p{L}/u.test(character));
+  const hasLatin = letters.some((character) =>
+    /\p{Script=Latin}/u.test(character),
+  );
+  const hasUnsupportedLetter = letters.some(
+    (character) => !/\p{Script=Latin}/u.test(character),
+  );
+  return hasLatin && !hasUnsupportedLetter ? "en" : "other";
+}
+
+function normalizeVocabularyTerm(value) {
+  if (typeof value !== "string") {
+    throw vocabularyError(
+      "VOCABULARY_INVALID_TERM",
+      "Vocabulary text is required.",
+    );
+  }
+  const term = value.normalize("NFKC").replace(/\s+/gu, " ").trim();
+  if (!term) {
+    throw vocabularyError(
+      "VOCABULARY_INVALID_TERM",
+      "Vocabulary text is required.",
+    );
+  }
+  if (term.length > VOCABULARY_MAX_TERM_CHARS) {
+    throw vocabularyError(
+      "VOCABULARY_INVALID_TERM",
+      "Vocabulary text cannot exceed 1,000 characters.",
+    );
+  }
+
+  const sourceLanguage = detectVocabularySourceLanguage(term);
+  // CJK terms are exact after Unicode/whitespace normalization. Latin-only
+  // terms use a case-insensitive key so repeated capitalization is free.
+  const normalizedTerm = ["zh", "ja", "ko"].includes(sourceLanguage)
+    ? term
+    : term.toLocaleLowerCase("en-US");
+
+  return { term, normalizedTerm, sourceLanguage };
+}
+
+function validateVocabularyEnrichment(value, selectedTerm = "") {
+  let parsed = value;
+  if (typeof value === "string") {
+    if (value.length > 10_000) {
+      throw vocabularyError(
+        "VOCABULARY_INVALID_RESPONSE",
+        "Vocabulary response is too large.",
+      );
+    }
+    try {
+      parsed = parseLooseJson(value);
+    } catch (error) {
+      throw vocabularyError(
+        "VOCABULARY_INVALID_RESPONSE",
+        `Invalid vocabulary JSON: ${error.message}`,
+      );
+    }
+  }
+
+  const boundedField = (fieldName, maxLength) => {
+    const fieldValue =
+      typeof parsed?.[fieldName] === "string"
+        ? parsed[fieldName].normalize("NFKC").trim()
+        : "";
+    if (!fieldValue) {
+      throw vocabularyError(
+        "VOCABULARY_INVALID_RESPONSE",
+        `Vocabulary ${fieldName} is required.`,
+      );
+    }
+    if (fieldValue.length > maxLength) {
+      throw vocabularyError(
+        "VOCABULARY_INVALID_RESPONSE",
+        `Vocabulary ${fieldName} cannot exceed ${maxLength.toLocaleString("en-US")} characters.`,
+      );
+    }
+    if (/<\/?[a-z][^>]*>/iu.test(fieldValue)) {
+      throw vocabularyError(
+        "VOCABULARY_INVALID_RESPONSE",
+        `Vocabulary ${fieldName} must be plain text, not HTML.`,
+      );
+    }
+    return fieldValue;
+  };
+
+  let phonetic = "";
+  if (parsed?.phonetic !== undefined && parsed?.phonetic !== null) {
+    if (typeof parsed.phonetic !== "string") {
+      throw vocabularyError(
+        "VOCABULARY_INVALID_RESPONSE",
+        "Vocabulary phonetic must be plain text.",
+      );
+    }
+    phonetic = parsed.phonetic.normalize("NFKC").trim();
+    if (phonetic.length > 160) {
+      throw vocabularyError(
+        "VOCABULARY_INVALID_RESPONSE",
+        "Vocabulary phonetic cannot exceed 160 characters.",
+      );
+    }
+    if (/[<>]/u.test(phonetic)) {
+      throw vocabularyError(
+        "VOCABULARY_INVALID_RESPONSE",
+        "Vocabulary phonetic must be plain text, not markup.",
+      );
+    }
+  }
+
+  const normalizedSelectedTerm =
+    typeof selectedTerm === "string"
+      ? selectedTerm.normalize("NFKC").replace(/\s+/gu, " ").trim()
+      : "";
+  const selectedLanguage = normalizedSelectedTerm
+    ? detectVocabularySourceLanguage(normalizedSelectedTerm)
+    : "";
+  if (
+    normalizedSelectedTerm.length > VOCABULARY_MAX_PHONETIC_TERM_CHARS ||
+    (selectedLanguage && !["en", "zh"].includes(selectedLanguage))
+  ) {
+    phonetic = "";
+  }
+
+  return {
+    meaningZh: boundedField("meaningZh", 500),
+    explanationZh: boundedField("explanationZh", 2_000),
+    phonetic,
+  };
+}
+
+function buildVocabularyEntry(
+  message,
+  enrichment,
+  now = Date.now(),
+  requestedId,
+) {
+  const normalized = normalizeVocabularyTerm(message?.term);
+  const validatedEnrichment = validateVocabularyEnrichment(
+    enrichment,
+    normalized.term,
+  );
+  const videoId =
+    typeof message?.videoId === "string" ? message.videoId.trim() : "";
+  if (!/^[A-Za-z0-9_-]{1,100}$/.test(videoId)) {
+    throw vocabularyError(
+      "VOCABULARY_INVALID_VIDEO",
+      "A valid YouTube video ID is required.",
+    );
+  }
+
+  const timestampNumber = Number(message?.timestamp);
+  if (
+    !Number.isFinite(timestampNumber) ||
+    timestampNumber < 0 ||
+    timestampNumber > 31_536_000
+  ) {
+    throw vocabularyError(
+      "VOCABULARY_INVALID_TIMESTAMP",
+      "Vocabulary timestamp is invalid.",
+    );
+  }
+  const timestampSeconds = Math.floor(timestampNumber);
+  const minutes = Math.floor(timestampSeconds / 60);
+  const seconds = timestampSeconds % 60;
+
+  const safeText = (value, maxLength, fallback = "") =>
+    typeof value === "string"
+      ? value.normalize("NFKC").trim().slice(0, maxLength)
+      : fallback;
+  const createdAtNumber = Number(now);
+  if (!Number.isFinite(createdAtNumber) || createdAtNumber < 0) {
+    throw vocabularyError(
+      "VOCABULARY_INVALID_ENTRY",
+      "Vocabulary creation time is invalid.",
+    );
+  }
+  const createdAt = Math.floor(createdAtNumber);
+  const generatedId = `vocab_${createdAt}_${Math.random().toString(36).slice(2, 10)}`;
+  const id = typeof requestedId === "string" ? requestedId : generatedId;
+  if (!/^[A-Za-z0-9_-]{1,200}$/.test(id)) {
+    throw vocabularyError(
+      "VOCABULARY_INVALID_ENTRY",
+      "Vocabulary ID is invalid.",
+    );
+  }
+
+  return {
+    id,
+    term: normalized.term,
+    normalizedTerm: normalized.normalizedTerm,
+    sourceLanguage: normalized.sourceLanguage,
+    meaningZh: validatedEnrichment.meaningZh,
+    explanationZh: validatedEnrichment.explanationZh,
+    phonetic: validatedEnrichment.phonetic,
+    sourceExcerpt: safeText(message?.sourceExcerpt, 3_000, normalized.term),
+    context: safeText(message?.context, 12_000),
+    videoId,
+    videoTitle: safeText(message?.videoTitle, 500, "Untitled Video"),
+    channelName: safeText(message?.channelName, 300),
+    timestamp: `${minutes}:${String(seconds).padStart(2, "0")}`,
+    timestampSeconds,
+    timestampedUrl: `https://www.youtube.com/watch?v=${videoId}&t=${timestampSeconds}s`,
+    createdAt,
+  };
+}
+
+function validateStoredVocabularyEntry(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  try {
+    const entry = buildVocabularyEntry(
+      { ...value, timestamp: value.timestampSeconds },
+      {
+        meaningZh: value.meaningZh,
+        explanationZh: value.explanationZh,
+        phonetic: value.phonetic,
+      },
+      value.createdAt,
+      value.id,
+    );
+    // A stored normalization mismatch is rejected instead of silently changing
+    // duplicate identity during reads.
+    const legacyLanguageMatch =
+      (value.sourceLanguage === "und" && entry.sourceLanguage === "other") ||
+      (value.sourceLanguage === "zh" && entry.sourceLanguage === "ja") ||
+      (value.sourceLanguage === "en" && entry.sourceLanguage === "other");
+    if (
+      value.normalizedTerm !== entry.normalizedTerm ||
+      (value.sourceLanguage !== entry.sourceLanguage && !legacyLanguageMatch)
+    ) {
+      return null;
+    }
+    return entry;
+  } catch (error) {
+    return null;
+  }
+}
+
+async function readValidVocabulary() {
+  const snapshot = await readVocabularySnapshot();
+  return snapshot.validEntries;
+}
+
+async function readVocabularySnapshot() {
+  const stored = await chrome.storage.local.get(VOCABULARY_STORAGE_KEY);
+  const rawEntries = Array.isArray(stored[VOCABULARY_STORAGE_KEY])
+    ? stored[VOCABULARY_STORAGE_KEY]
+    : [];
+  return {
+    rawEntries,
+    validEntries: rawEntries.map(validateStoredVocabularyEntry).filter(Boolean),
+  };
+}
+
+async function saveVocabularyMutation(message) {
+  try {
+    const normalized = normalizeVocabularyTerm(message?.term);
+    let snapshot = await readVocabularySnapshot();
+    const existing = snapshot.validEntries.find(
+      (entry) => entry.normalizedTerm === normalized.normalizedTerm,
+    );
+    if (existing) {
+      return {
+        success: true,
+        alreadySaved: true,
+        entry: existing,
+      };
+    }
+    if (snapshot.rawEntries.length >= VOCABULARY_MAX_ENTRIES) {
+      return {
+        success: false,
+        error: "VOCABULARY_CAPACITY",
+        message: "Vocabulary is full. Delete an entry before saving more (maximum 500).",
+      };
+    }
+
+    const promptVariables = {
+      selectedTextJson: JSON.stringify(normalized.term),
+      sourceExcerptJson: JSON.stringify(
+        typeof message?.sourceExcerpt === "string"
+          ? message.sourceExcerpt.slice(0, 3_000)
+          : "",
+      ),
+      transcriptContextJson: JSON.stringify(
+        typeof message?.context === "string"
+          ? message.context.slice(0, 12_000)
+          : "",
+      ),
+      videoTitleJson: JSON.stringify(
+        typeof message?.videoTitle === "string"
+          ? message.videoTitle.slice(0, 500)
+          : "Untitled Video",
+      ),
+    };
+    const systemPrompt = await loadPromptSection(
+      "vocabulary.md",
+      "System prompt",
+      promptVariables,
+    );
+    const userPrompt = await loadPromptSection(
+      "vocabulary.md",
+      "User prompt",
+      promptVariables,
+    );
+    const { text } = await requestAiCompletion({
+      maxTokens: 768,
+      temperature: 0.2,
+      responseFormat: { type: "json_object" },
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+    });
+    const enrichment = validateVocabularyEnrichment(text, normalized.term);
+    const entry = buildVocabularyEntry(message, enrichment);
+
+    // Re-read immediately before the single storage write. This protects
+    // against changes from another extension view while the provider ran.
+    snapshot = await readVocabularySnapshot();
+    const lateExisting = snapshot.validEntries.find(
+      (candidate) => candidate.normalizedTerm === entry.normalizedTerm,
+    );
+    if (lateExisting) {
+      return {
+        success: true,
+        alreadySaved: true,
+        entry: lateExisting,
+      };
+    }
+    if (snapshot.rawEntries.length >= VOCABULARY_MAX_ENTRIES) {
+      return {
+        success: false,
+        error: "VOCABULARY_CAPACITY",
+        message: "Vocabulary is full. Delete an entry before saving more (maximum 500).",
+      };
+    }
+
+    await chrome.storage.local.set({
+      [VOCABULARY_STORAGE_KEY]: [entry, ...snapshot.rawEntries],
+    });
+    chrome.runtime
+      .sendMessage({ action: "vocabularySaved", entry })
+      .catch(() => {});
+    return { success: true, alreadySaved: false, entry };
+  } catch (error) {
+    return {
+      success: false,
+      error: error.code || error.message || "VOCABULARY_SAVE_FAILED",
+      message: error.message || "Could not save vocabulary.",
+    };
+  }
+}
+
+let vocabularyMutationQueue = Promise.resolve();
+function enqueueVocabularyMutation(mutation) {
+  const operation = vocabularyMutationQueue.then(
+    mutation,
+    mutation,
+  );
+  vocabularyMutationQueue = operation.then(
+    () => undefined,
+    () => undefined,
+  );
+  return operation;
+}
+
+function saveVocabulary(message) {
+  return enqueueVocabularyMutation(() => saveVocabularyMutation(message));
+}
+
+async function getVocabulary(videoId) {
+  try {
+    const requestedVideoId =
+      typeof videoId === "string" && videoId.trim() ? videoId.trim() : "";
+    if (requestedVideoId && !/^[A-Za-z0-9_-]{1,100}$/.test(requestedVideoId)) {
+      throw vocabularyError(
+        "VOCABULARY_INVALID_VIDEO",
+        "Vocabulary video filter is invalid.",
+      );
+    }
+    let vocabulary = await readValidVocabulary();
+    if (requestedVideoId) {
+      vocabulary = vocabulary.filter(
+        (entry) => entry.videoId === requestedVideoId,
+      );
+    }
+    vocabulary.sort((left, right) => right.createdAt - left.createdAt);
+    return { success: true, vocabulary };
+  } catch (error) {
+    return {
+      success: false,
+      error: error.code || error.message,
+      message: error.message,
+      vocabulary: [],
+    };
+  }
+}
+
+async function deleteVocabularyMutation(vocabularyId) {
+  try {
+    if (
+      typeof vocabularyId !== "string" ||
+      !/^[A-Za-z0-9_-]{1,200}$/.test(vocabularyId)
+    ) {
+      throw vocabularyError(
+        "VOCABULARY_INVALID_ID",
+        "Vocabulary ID is invalid.",
+      );
+    }
+    const stored = await chrome.storage.local.get(VOCABULARY_STORAGE_KEY);
+    const vocabulary = Array.isArray(stored[VOCABULARY_STORAGE_KEY])
+      ? stored[VOCABULARY_STORAGE_KEY]
+      : [];
+    const remaining = vocabulary.filter(
+      (entry) => entry?.id !== vocabularyId,
+    );
+    const deleted = remaining.length !== vocabulary.length;
+    if (deleted) {
+      await chrome.storage.local.set({
+        [VOCABULARY_STORAGE_KEY]: remaining,
+      });
+    }
+    return { success: true, deleted };
+  } catch (error) {
+    return {
+      success: false,
+      deleted: false,
+      error: error.code || error.message,
+      message: error.message,
+    };
+  }
+}
+
+function deleteVocabulary(vocabularyId) {
+  return enqueueVocabularyMutation(() =>
+    deleteVocabularyMutation(vocabularyId),
+  );
+}
+
 async function handleExplainSelection(
   selectedText,
   transcriptContext,
@@ -1376,9 +2060,11 @@ async function handleExplainSelection(
     }
 
     const variables = {
-      videoTitle: videoTitle || "Unknown",
-      selectedText,
-      transcriptContext: transcriptContext || "None",
+      explainPayload: JSON.stringify({
+        videoTitle: videoTitle || "Unknown",
+        selectedText,
+        transcriptContext: transcriptContext || "None",
+      }),
     };
     const systemPrompt = await loadPromptSection(
       "explain.md",
@@ -1409,6 +2095,636 @@ async function handleExplainSelection(
     return {
       success: false,
       error: error.message || "Failed to explain selection",
+    };
+  }
+}
+
+// ============================================================
+// ASK — Transcript-grounded questions with optional Tavily search
+// ============================================================
+
+function normalizeAskQuestion(text) {
+  if (typeof text !== "string") {
+    throw new Error("Ask question must be text");
+  }
+  const question = text.trim();
+  if (!question) {
+    throw new Error("Ask question cannot be empty");
+  }
+  if (question.length > ASK_MAX_QUESTION_CHARS) {
+    throw new Error("Ask question cannot exceed 2,000 characters");
+  }
+  return question;
+}
+
+function normalizeAskHistory(messages) {
+  if (messages === undefined || messages === null) return [];
+  if (!Array.isArray(messages)) {
+    throw new Error("Ask history must be an array");
+  }
+  if (messages.length > 100) {
+    throw new Error("Ask history contains too many messages");
+  }
+  const normalized = messages.map((message, index) => {
+    const expectedRole = index % 2 === 0 ? "user" : "assistant";
+    if (message?.role !== expectedRole) {
+      throw new Error("Ask history roles must alternate user and assistant");
+    }
+    if (typeof message.content !== "string" || !message.content.trim()) {
+      throw new Error("Ask history messages must contain text");
+    }
+    const maxLength = expectedRole === "user" ? 2_000 : 10_000;
+    return {
+      role: expectedRole,
+      content: message.content.trim().slice(0, maxLength),
+    };
+  });
+  if (normalized.length % 2 !== 0) {
+    throw new Error("Ask history must contain complete user/assistant rounds");
+  }
+
+  const recent = normalized.slice(-ASK_MAX_HISTORY_ROUNDS * 2);
+  const retainedRounds = [];
+  let retainedCharacters = 0;
+  for (let index = recent.length - 2; index >= 0; index -= 2) {
+    const round = [recent[index], recent[index + 1]];
+    const roundCharacters = round[0].content.length + round[1].content.length;
+    if (retainedCharacters + roundCharacters > ASK_MAX_HISTORY_CHARS) break;
+    retainedRounds.unshift(round);
+    retainedCharacters += roundCharacters;
+  }
+  return retainedRounds.flat();
+}
+
+function normalizeAskSuggestions(modelJson) {
+  const questions = modelJson?.questions;
+  if (!Array.isArray(questions) || questions.length !== 3) {
+    throw new Error("Ask suggestions must contain exactly three unique questions");
+  }
+
+  const normalized = questions.map((question) =>
+    typeof question === "string" ? question.trim() : "",
+  );
+  const unique = new Set(
+    normalized.map((question) => question.normalize("NFKC").toLowerCase()),
+  );
+  if (
+    normalized.some((question) => !question || question.length > 200) ||
+    unique.size !== 3
+  ) {
+    throw new Error("Ask suggestions must contain exactly three unique questions");
+  }
+  return normalized;
+}
+
+function hasCredentialBearingUrl(parsedUrl) {
+  if (parsedUrl.username || parsedUrl.password) return true;
+  const credentialParameter =
+    /^(?:api[-_]?key|key|token|access[-_]?token|auth|authorization|secret|password|passwd)$/i;
+  for (const key of parsedUrl.searchParams.keys()) {
+    if (credentialParameter.test(key)) return true;
+  }
+  return /(?:^|[&#])(?:access[-_]?token|api[-_]?key|token|secret|password)=/i.test(
+    parsedUrl.hash,
+  );
+}
+
+function normalizeTavilyResults(payload) {
+  const candidates = Array.isArray(payload)
+    ? payload
+    : Array.isArray(payload?.results)
+      ? payload.results
+      : [];
+  const results = [];
+
+  for (const candidate of candidates) {
+    if (results.length >= 5) break;
+    if (
+      typeof candidate?.title !== "string" ||
+      typeof candidate?.url !== "string" ||
+      typeof candidate?.content !== "string" ||
+      typeof candidate?.score !== "number" ||
+      !Number.isFinite(candidate.score)
+    ) {
+      continue;
+    }
+
+    const rawUrl = candidate.url.trim();
+    if (
+      !rawUrl ||
+      rawUrl.length > 2_048 ||
+      /[\u0000-\u0020\u007f]/.test(rawUrl)
+    ) {
+      continue;
+    }
+
+    let parsedUrl;
+    try {
+      parsedUrl = new URL(rawUrl);
+    } catch (_error) {
+      continue;
+    }
+    if (
+      !["http:", "https:"].includes(parsedUrl.protocol) ||
+      hasCredentialBearingUrl(parsedUrl)
+    ) {
+      continue;
+    }
+
+    const title = candidate.title.trim().slice(0, 300);
+    if (!title) continue;
+    results.push({
+      title,
+      url: parsedUrl.href,
+      content: candidate.content.trim().slice(0, 2_000),
+      score: Math.max(0, Math.min(1, candidate.score)),
+    });
+  }
+  return results;
+}
+
+function normalizeAskOptionalText(value, fieldName, maxLength) {
+  if (value === undefined || value === null || value === "") return "";
+  if (typeof value !== "string") {
+    throw new Error(`${fieldName} must be text`);
+  }
+  return value.trim().slice(0, maxLength);
+}
+
+function formatOverviewForAsk(overview) {
+  if (typeof overview === "string") return overview.trim().slice(0, 12_000);
+  if (!overview || typeof overview !== "object" || Array.isArray(overview)) {
+    return "";
+  }
+
+  const parts = [];
+  const summary = normalizeAskOptionalText(
+    overview.summary,
+    "Overview summary",
+    4_000,
+  );
+  if (summary) parts.push(`Summary: ${summary}`);
+  if (Array.isArray(overview.chapters)) {
+    for (const chapter of overview.chapters.slice(0, 50)) {
+      if (!chapter || typeof chapter !== "object") continue;
+      const title = normalizeAskOptionalText(
+        chapter.title,
+        "Overview chapter title",
+        300,
+      );
+      const chapterSummary = normalizeAskOptionalText(
+        chapter.summary,
+        "Overview chapter summary",
+        1_000,
+      );
+      const timestamp = normalizeAskOptionalText(
+        chapter.timestamp,
+        "Overview chapter timestamp",
+        20,
+      );
+      if (title || chapterSummary) {
+        parts.push(
+          `${timestamp ? `[${timestamp}] ` : ""}${title}${
+            title && chapterSummary ? ": " : ""
+          }${chapterSummary}`,
+        );
+      }
+      if (parts.join("\n").length >= 12_000) break;
+    }
+  }
+  return parts.join("\n").slice(0, 12_000);
+}
+
+function splitAskTranscriptLines(transcriptText) {
+  const lines = [];
+  for (const rawLine of transcriptText.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    for (let offset = 0; offset < line.length; offset += 2_000) {
+      lines.push(line.slice(offset, offset + 2_000));
+    }
+  }
+  return lines;
+}
+
+function joinAskLinesWithin(lines, maxCharacters) {
+  let text = "";
+  for (const line of lines) {
+    const separator = text ? "\n" : "";
+    const remaining = maxCharacters - text.length - separator.length;
+    if (remaining <= 0) break;
+    text += separator + line.slice(0, remaining);
+    if (line.length > remaining) break;
+  }
+  return text;
+}
+
+function relevantAskLineIndexes(lines, question) {
+  const ignored = new Set([
+    "about",
+    "does",
+    "from",
+    "have",
+    "that",
+    "the",
+    "this",
+    "what",
+    "when",
+    "where",
+    "which",
+    "with",
+    "would",
+  ]);
+  const tokens = [
+    ...new Set(
+      (question.toLowerCase().match(/[\p{L}\p{N}]{2,}/gu) || []).filter(
+        (token) => !ignored.has(token),
+      ),
+    ),
+  ].slice(0, 24);
+  if (!tokens.length) return [];
+
+  const scored = [];
+  lines.forEach((line, index) => {
+    const lower = line.toLowerCase();
+    const score = tokens.reduce(
+      (total, token) => total + (lower.includes(token) ? 1 : 0),
+      0,
+    );
+    if (score > 0) scored.push({ index, score });
+  });
+  scored.sort((left, right) => right.score - left.score || left.index - right.index);
+
+  const selected = new Set();
+  for (const { index } of scored.slice(0, 20)) {
+    for (let nearby = Math.max(0, index - 1); nearby <= index + 1; nearby += 1) {
+      if (nearby < lines.length) selected.add(nearby);
+    }
+  }
+  return [...selected].sort((left, right) => left - right);
+}
+
+function buildAskTranscriptContext({ transcriptText, question = "", overview } = {}) {
+  if (typeof transcriptText !== "string" || !transcriptText.trim()) {
+    throw new Error("Ask requires a transcript");
+  }
+  if (transcriptText.length > 2_000_000) {
+    throw new Error("Ask transcript is too large");
+  }
+  const transcript = transcriptText.trim();
+  if (transcript.length <= ASK_MAX_TRANSCRIPT_CHARS) {
+    return { text: transcript, reduced: false };
+  }
+
+  const normalizedQuestion =
+    typeof question === "string" ? question.trim().slice(0, 2_000) : "";
+  const lines = splitAskTranscriptLines(transcript);
+  const overviewText = formatOverviewForAsk(overview);
+  const relevantIndexes = relevantAskLineIndexes(lines, normalizedQuestion);
+  const relevantLines = relevantIndexes.map((index) => lines[index]);
+  const sampleSize = Math.min(36, lines.length);
+  const middleStart = Math.max(
+    0,
+    Math.floor(lines.length / 2) - Math.floor(sampleSize / 2),
+  );
+  const beginningLines = lines.slice(0, sampleSize);
+  const middleLines = lines.slice(middleStart, middleStart + sampleSize);
+  const endingLines = lines.slice(Math.max(0, lines.length - sampleSize));
+
+  const sections = [];
+  if (overviewText) {
+    sections.push(
+      `OVERVIEW (untrusted reference data):\n${overviewText.slice(0, 11_000)}`,
+    );
+  }
+  if (relevantLines.length) {
+    sections.push(
+      `QUESTION-RELEVANT TRANSCRIPT LINES (untrusted reference data):\n${joinAskLinesWithin(
+        relevantLines,
+        32_000,
+      )}`,
+    );
+  }
+  sections.push(
+    `BEGINNING SAMPLE (untrusted reference data):\n${joinAskLinesWithin(
+      beginningLines,
+      24_000,
+    )}`,
+    `MIDDLE SAMPLE (untrusted reference data):\n${joinAskLinesWithin(
+      middleLines,
+      24_000,
+    )}`,
+    `ENDING SAMPLE (untrusted reference data):\n${joinAskLinesWithin(
+      endingLines,
+      24_000,
+    )}`,
+  );
+
+  return {
+    text: sections.join("\n\n").slice(0, ASK_MAX_TRANSCRIPT_CHARS),
+    reduced: true,
+  };
+}
+
+function buildTavilyQuery({ videoTitle, question, overview } = {}) {
+  const title =
+    typeof videoTitle === "string" ? videoTitle.trim().slice(0, 160) : "";
+  const normalizedQuestion = normalizeAskQuestion(question).slice(0, 220);
+  const overviewText = formatOverviewForAsk(overview)
+    .replace(/\s+/g, " ")
+    .slice(0, 140);
+  return [title, normalizedQuestion, overviewText]
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 399)
+    .trim();
+}
+
+function safeAskPromptJson(value) {
+  return JSON.stringify(value)
+    .replaceAll("<", "\\u003c")
+    .replaceAll(">", "\\u003e")
+    .replaceAll("&", "\\u0026");
+}
+
+function normalizeAskRequestMetadata(message) {
+  return {
+    title:
+      normalizeAskOptionalText(message.videoTitle, "Video title", 500) ||
+      "Unknown",
+    channel: normalizeAskOptionalText(
+      message.channelName,
+      "Channel name",
+      300,
+    ),
+    description: normalizeAskOptionalText(
+      message.videoDescription,
+      "Video description",
+      5_000,
+    ),
+  };
+}
+
+async function readBoundedTavilyJson(response) {
+  const reader = response.body?.getReader?.();
+  if (reader) {
+    const decoder = new TextDecoder();
+    let responseText = "";
+    let responseBytes = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      responseBytes += value?.byteLength ?? 0;
+      if (responseBytes > TAVILY_MAX_RESPONSE_BYTES) {
+        try {
+          await reader.cancel?.();
+        } catch (_error) {
+          // The size rejection is authoritative even if cancellation races.
+        }
+        const error = new Error("Tavily response exceeded the 512 KiB limit");
+        error.code = "TAVILY_RESPONSE_TOO_LARGE";
+        throw error;
+      }
+      responseText += decoder.decode(value, { stream: true });
+    }
+    responseText += decoder.decode();
+    return JSON.parse(responseText.trimStart());
+  }
+
+  if (typeof response.text === "function") {
+    const responseText = await response.text();
+    const responseBytes = new TextEncoder().encode(responseText).byteLength;
+    if (responseBytes > TAVILY_MAX_RESPONSE_BYTES) {
+      const error = new Error("Tavily response exceeded the 512 KiB limit");
+      error.code = "TAVILY_RESPONSE_TOO_LARGE";
+      throw error;
+    }
+    return JSON.parse(responseText.trimStart());
+  }
+
+  throw new Error("Tavily response could not be read safely");
+}
+
+async function performTavilySearch(query, apiKey) {
+  if (typeof apiKey !== "string" || !apiKey.trim()) {
+    throw new Error("Tavily API key is not configured");
+  }
+  const controller = new AbortController();
+  let timeoutId;
+  const timeout = new Promise((_resolve, reject) => {
+    timeoutId = setTimeout(() => {
+      controller.abort();
+      const error = new Error("Tavily search exceeded the 15-second limit");
+      error.code = "TAVILY_TIMEOUT";
+      reject(error);
+    }, TAVILY_SEARCH_TIMEOUT_MS);
+  });
+  const request = (async () => {
+    const response = await fetch(TAVILY_SEARCH_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey.trim()}`,
+      },
+      body: JSON.stringify({
+        query,
+        search_depth: "basic",
+        max_results: 5,
+        include_answer: false,
+        include_raw_content: false,
+      }),
+      signal: controller.signal,
+    });
+    const payload = await readBoundedTavilyJson(response);
+    if (!response.ok) {
+      throw new Error(`Tavily search failed with HTTP ${response.status}`);
+    }
+    return normalizeTavilyResults(payload);
+  })();
+
+  try {
+    return await Promise.race([request, timeout]);
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+function normalizeAskVideoId(videoId) {
+  if (
+    typeof videoId !== "string" ||
+    !/^[A-Za-z0-9_-]{6,32}$/.test(videoId.trim())
+  ) {
+    throw new Error("Invalid video ID for Ask suggestions");
+  }
+  return videoId.trim();
+}
+
+async function readCachedAskSuggestions(videoId) {
+  try {
+    const cacheKey = `digest_${videoId}`;
+    const stored = await chrome.storage.local.get(cacheKey);
+    const cached = stored[cacheKey];
+    if (!cached?.askSuggestions) return null;
+    return {
+      suggestions: normalizeAskSuggestions({
+        questions: cached.askSuggestions,
+      }),
+      contextReduced: cached.askSuggestionsContextReduced === true,
+    };
+  } catch (_error) {
+    return null;
+  }
+}
+
+async function writeCachedAskSuggestions(videoId, suggestions, contextReduced) {
+  try {
+    const cacheKey = `digest_${videoId}`;
+    const stored = await chrome.storage.local.get(cacheKey);
+    await chrome.storage.local.set({
+      [cacheKey]: {
+        ...(stored[cacheKey] || {}),
+        askSuggestions: suggestions,
+        askSuggestionsContextReduced: contextReduced === true,
+      },
+    });
+  } catch (_error) {
+    // Suggestions remain usable for this panel session when caching fails.
+  }
+}
+
+async function handleSuggestVideoQuestions(message) {
+  try {
+    const videoId = normalizeAskVideoId(message?.videoId);
+    const cached = await readCachedAskSuggestions(videoId);
+    if (cached) return { success: true, ...cached, cached: true };
+
+    const metadata = normalizeAskRequestMetadata(message || {});
+    const context = buildAskTranscriptContext({
+      transcriptText: message?.transcriptText,
+      question: metadata.title,
+      overview: message?.overview,
+    });
+    const overviewText = formatOverviewForAsk(message?.overview);
+    const variables = {
+      metadataJson: safeAskPromptJson(metadata),
+      overviewJson: safeAskPromptJson({ text: overviewText }),
+      transcriptJson: safeAskPromptJson(context),
+    };
+    const systemPrompt = await loadPromptSection(
+      "ask.md",
+      "Suggestions system prompt",
+      variables,
+    );
+    const userPrompt = await loadPromptSection(
+      "ask.md",
+      "Suggestions user prompt",
+      variables,
+    );
+    const { text } = await requestAiCompletion({
+      temperature: 0.3,
+      maxTokens: 512,
+      responseFormat: { type: "json_object" },
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+    });
+    const suggestions = normalizeAskSuggestions(parseLooseJson(text));
+    await writeCachedAskSuggestions(videoId, suggestions, context.reduced);
+    return {
+      success: true,
+      suggestions,
+      contextReduced: context.reduced,
+      cached: false,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error.code || error.message || "Could not generate questions",
+      message: error.message || "Could not generate questions",
+    };
+  }
+}
+
+async function handleAskVideo(message) {
+  try {
+    const question = normalizeAskQuestion(message?.question);
+    const history = normalizeAskHistory(message?.history);
+    const metadata = normalizeAskRequestMetadata(message || {});
+    const context = buildAskTranscriptContext({
+      transcriptText: message?.transcriptText,
+      question,
+      overview: message?.overview,
+    });
+
+    let sources = [];
+    let webWarning = "";
+    if (message?.webEnabled === true) {
+      const settings = await getSettings();
+      if (!settings.tavilyApiKey) {
+        webWarning =
+          "Tavily is not configured, so web search was unavailable. Answered using video content only.";
+      } else {
+        try {
+          sources = await performTavilySearch(
+            buildTavilyQuery({
+              videoTitle: metadata.title,
+              question,
+              overview: message?.overview,
+            }),
+            settings.tavilyApiKey,
+          );
+          if (!sources.length) {
+            webWarning =
+              "Web search returned no usable sources. Answered using video content only.";
+          }
+        } catch (_error) {
+          sources = [];
+          webWarning =
+            "Web search was unavailable. Answered using video content only.";
+        }
+      }
+    }
+
+    const variables = {
+      metadataJson: safeAskPromptJson(metadata),
+      historyJson: safeAskPromptJson(history),
+      transcriptJson: safeAskPromptJson(context),
+      webResultsJson: safeAskPromptJson(sources),
+      questionJson: safeAskPromptJson(question),
+    };
+    const systemPrompt = await loadPromptSection(
+      "ask.md",
+      "Answer system prompt",
+      variables,
+    );
+    const userPrompt = await loadPromptSection(
+      "ask.md",
+      "Answer user context",
+      variables,
+    );
+    const { text } = await requestAiCompletion({
+      temperature: 0.3,
+      maxTokens: 2_048,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+    });
+    return {
+      success: true,
+      answer: text.trim().slice(0, ASK_MAX_ANSWER_CHARS),
+      sources,
+      contextReduced: context.reduced,
+      webWarning,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error.code || error.message || "Could not answer this question",
+      message: error.message || "Could not answer this question",
     };
   }
 }
@@ -1512,7 +2828,7 @@ function normalizeTranslatedSegmentBatch(parsed, sourceSegments) {
 /**
  * Translates content using DeepSeek.
  * @param {Object} content - JSON object containing semantic transcript segments
- * @param {string} contentType - Must be 'transcriptBatch'
+ * @param {string} contentType - 'transcriptBatch', 'overviewBatch', or 'explainBatch'
  * @param {string} targetLanguage - 'zh' for Simplified Chinese
  * @param {string} videoTitle - The video title (for context)
  * @returns {Object} - { success, translatedContent } or { success: false, error }
@@ -1530,7 +2846,11 @@ async function handleTranslateContent(
         error: `Unsupported translation target: ${String(targetLanguage)}`,
       };
     }
-    if (contentType !== "transcriptBatch") {
+    if (
+      !["transcriptBatch", "overviewBatch", "explainBatch"].includes(
+        contentType,
+      )
+    ) {
       return {
         success: false,
         error: `Unsupported translation content type: ${String(contentType)}`,
@@ -1543,11 +2863,23 @@ async function handleTranslateContent(
     }
 
     const sourceSegments = validateTranscriptBatchRequest(content);
+    if (contentType === "explainBatch" && sourceSegments.length !== 1) {
+      return {
+        success: false,
+        error: "Explanation translation requires exactly one segment",
+      };
+    }
     const langName = "Simplified Chinese";
     const baseRules = await getTranslationBaseRules(targetLanguage);
+    const promptSection =
+      contentType === "overviewBatch"
+        ? "Overview batch translation"
+        : contentType === "explainBatch"
+          ? "Explanation translation"
+          : "Transcript batch translation";
     const systemPrompt = await loadPromptSection(
       "translation.md",
-      "Transcript batch translation",
+      promptSection,
       {
         langName,
         videoTitle: videoTitle || "Unknown",
@@ -1635,4 +2967,31 @@ globalThis.__YTD_TRANSLATION_TESTING__ = {
   validateTranscriptBatchRequest,
   normalizeTranslatedSegmentBatch,
   handleTranslateContent,
+  validateAndFixTimestamps,
+  buildOverviewQuoteNote,
+  normalizeTranscriptMode,
+  handleFetchTranscript,
+  pollTranscriptJob,
+  handleExplainSelection,
+};
+
+globalThis.__YTD_ASK_TESTING__ = {
+  normalizeAskQuestion,
+  normalizeAskHistory,
+  normalizeAskSuggestions,
+  normalizeTavilyResults,
+  buildAskTranscriptContext,
+  buildTavilyQuery,
+  handleSuggestVideoQuestions,
+  handleAskVideo,
+};
+
+globalThis.__YTD_VOCABULARY_TESTING__ = {
+  normalizeVocabularyTerm,
+  validateVocabularyEnrichment,
+  buildVocabularyEntry,
+  validateStoredVocabularyEntry,
+  saveVocabulary,
+  getVocabulary,
+  deleteVocabulary,
 };

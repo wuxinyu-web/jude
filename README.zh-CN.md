@@ -2,13 +2,14 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-把每个 YouTube 视频变成一份可以深入学习的资料。YouTube Digest 把字幕、双语翻译、AI 概览、内容讲解和时间戳笔记放进同一个 Chrome 侧边栏，让你可以持续学习视频中的知识和语言，同时不丢失原视频上下文。
+把每个 YouTube 视频变成一份可以深入学习的资料。YouTube Digest 把字幕、双语翻译、AI 概览、内容讲解、视频问答、时间戳笔记和单词学习放进同一个 Chrome 侧边栏，让你可以持续学习视频中的知识和语言，同时不丢失原视频上下文。
 
 - 把零碎字幕变成清晰、可搜索的学习资料。
 - 查看原文、简体中文翻译，或中英双语对照字幕来学习语言。
-- 通过 AI 概览、章节、重点引用和选中文本讲解建立系统理解。
+- 通过全文摘要、AI 章节、重点引用和选中文本讲解建立系统理解。
 - 点击字幕、概览或笔记中的时间戳，快速跳转到对应位置。
-- 保存自动润色的时间戳笔记，方便之后复习。
+- 直接追问当前视频，并在你选择时补充网络搜索。
+- 保存自动润色的时间戳笔记和可复用的单词本，方便之后复习。
 - 使用自己的 API Key，数据保存在本地 Chrome 中，不包含分析统计或行为追踪。
 
 YouTube Digest 是一个需要自行提供 API Key 的开源项目，通过 GitHub 安装。目前没有上架 Chrome 应用商店，不赠送 API 额度，也没有开发者运营的服务器。
@@ -17,12 +18,12 @@ YouTube Digest 是一个需要自行提供 API Key 的开源项目，通过 GitH
 
 你不需要看懂代码，也不需要会使用命令行。把下面这段话发送给你的编程 Agent：
 
-> 请把这个项目下载或克隆到我选择的长期保留文件夹，告诉我准确的完整路径，并让 Chrome“加载已解压的扩展程序”使用同一个文件夹。如果我在第一次安装时需要位置建议，可以推荐 macOS 或 Linux 上的 `~/Documents/youtube-digest`，或 Windows 上的 `%USERPROFILE%\Documents\youtube-digest`，但不要假设我一定使用这些路径。请用简单易懂的语言一步一步指导我完成安装和配置。https://github.com/zarazhangrui/youtube-digest
+> 请把这个项目下载或克隆到我选择的长期保留文件夹，告诉我准确的完整路径，并让 Chrome“加载已解压的扩展程序”使用同一个文件夹。如果我在第一次安装时需要位置建议，可以推荐 macOS 或 Linux 上的 `~/Documents/youtube-digest`，或 Windows 上的 `%USERPROFILE%\Documents\youtube-digest`，但不要假设我一定使用这些路径。请用简单易懂的语言一步一步指导我完成安装和配置。https://github.com/JackChen1220/youtube-digest
 
 你的 Agent 应该帮你：
 
 1. 先询问你想把项目长期保存在哪里，再下载或克隆到那里，并告诉你准确的完整路径。如果你需要建议，可以推荐 macOS 或 Linux 上的 `~/Documents/youtube-digest`，或 Windows 上的 `%USERPROFILE%\Documents\youtube-digest`。
-2. 打开下方 Supadata 和 DeepSeek 官方页面，指导你创建自己的账号。
+2. 打开下方 Supadata 和 DeepSeek 官方页面，指导你创建自己的账号。Tavily 是可选的，只有 Ask 联网搜索才需要。
 3. 指导你在 Chrome 中通过“加载已解压的扩展程序”选择你刚才确定的那个准确项目文件夹。
 4. 告诉你应该在扩展的“设置”页面哪个位置填写 API Key。
 5. 打开一个带字幕的 YouTube 视频，确认字幕和翻译功能可以使用。
@@ -35,7 +36,7 @@ YouTube Digest 是一个需要自行提供 API Key 的开源项目，通过 GitH
 
 如果你想自己操作：
 
-1. 打开 [github.com/zarazhangrui/youtube-digest](https://github.com/zarazhangrui/youtube-digest)。
+1. 打开 [github.com/JackChen1220/youtube-digest](https://github.com/JackChen1220/youtube-digest)。
 2. 点击 **Code**，再选择 **Download ZIP**。
 3. 选择一个长期保留的文件夹，并把项目解压到这里。可选建议是 macOS 或 Linux 上的 `~/Documents/youtube-digest`，或 Windows 上的 `%USERPROFILE%\Documents\youtube-digest`。你也可以使用其他文件夹。
 4. 在 Chrome 地址栏打开 `chrome://extensions`。
@@ -48,10 +49,11 @@ YouTube Digest 是一个需要自行提供 API Key 的开源项目，通过 GitH
 
 ## 设置 API Key
 
-YouTube Digest 需要你在自己的服务账号中准备两个 Key：
+YouTube Digest 需要你在自己的服务账号中准备两个必需 Key，以及一个可选 Key：
 
 1. **Supadata API Key**，用于获取 YouTube 字幕。
-2. **DeepSeek API Key**，用于生成概览、讲解内容、翻译和自动润色笔记。
+2. **DeepSeek API Key**，用于生成概览、讲解内容、Ask、翻译、单词信息和自动润色笔记。
+3. 可选的 **Tavily API Key**，用于 Ask 联网搜索。只基于视频的 Ask 不需要 Tavily。
 
 ### 获取 Supadata API Key
 
@@ -74,6 +76,14 @@ YouTube Digest 需要你在自己的服务账号中准备两个 Key：
 
 当前账号和接口说明请查看 [DeepSeek 官方 API 文档](https://api-docs.deepseek.com/)。
 
+### 获取可选的 Tavily API Key
+
+1. 打开官方 [Tavily 控制台](https://app.tavily.com/home)。
+2. 创建账号，并从 Tavily 账号复制 API Key。
+3. 把 Key 粘贴到 YouTube Digest 设置中的 **Tavily API key**。
+
+Tavily 仍然采用用户自带 Key 的 BYOK 模式，而且完全可选。如果只需要基于当前视频问答，可以留空。开启联网搜索前，请查看 [Tavily API 介绍](https://docs.tavily.com/documentation/api-reference/introduction)、[额度文档](https://docs.tavily.com/documentation/api-credits) 和[隐私政策](https://tavily.com/privacy)。
+
 在侧边栏中打开 **Settings**。你也可以在 `chrome://extensions` 的 YouTube Digest 卡片中打开扩展选项。Key 只能粘贴到这些设置输入框中。不要把 Key 发送到 AI 对话、项目文件、截图或公开消息中。
 
 发布版本只支持 DeepSeek V4 Flash：
@@ -89,26 +99,42 @@ API Key 和设置保存在你设备上的 Chrome 扩展本地存储中。发布�
 
 ## 使用 YouTube Digest
 
-1. 打开一个有字幕的普通 YouTube 视频页面。
+1. 打开一个普通 YouTube 视频页面。
 2. 点击 YouTube Digest 扩展图标，打开侧边栏。
-3. 阅读带时间戳的字幕，或选择 **Original**、**中文**、**双语**。
-4. 打开 **Overview**，查看 AI 生成的章节和重点引用。
-5. 选中字幕，获取 AI 内容讲解。
-6. 从播放器或重点引用中保存笔记，之后可以在 **Notes** 中查看。
+3. 使用顶部四个 Tab：**Transcript**、**Overview**、**Library** 和 **Ask**。
+4. 阅读带时间戳的字幕，或选择 **Original**、**中文**、**双语**。
+5. 打开 **Overview**，以 **Original**、**中文** 或 **双语**查看全文摘要、章节和重点引用。
+6. 选中字幕并选择 **Explain**。讲解可以显示为 **English**、**中文** 或 **双语**，不会改变选中的原文。
+7. 打开 **Library**，在 **Notes** 和 **Vocabulary** 之间切换。从 Overview 保存重点引用时，笔记会保留当时显示的语言。
+8. 打开 **Ask**，可以针对当前视频提问、使用推荐问题、总结、推荐相关内容或进行测验。
 
 ## 当前支持范围
 
 - Chrome 116 或更高版本。
 - 标准的 `youtube.com/watch` 视频页面。
 - Supadata 能够返回的原生字幕。YouTube Digest 会优先请求英文字幕，也可能显示其他可用的原生语言。
+- 没有原生字幕时，由用户确认后从视频音轨生成 AI 转录。
 - 原文、简体中文和双语对照字幕。
-- AI 概览、选中文本讲解、翻译和自动润色笔记。
-- 本地笔记，以及最近字幕、概览和翻译的本地缓存。
+- 包含全文摘要的 AI 概览、英文/中文/双语选中文本讲解、翻译、Ask、单词信息和字幕笔记自动润色。
+- Library 内包含本地 Notes 和 Vocabulary，以及按视频保存的字幕、概览和翻译缓存。
+- 支持当前视频多轮 Ask、3 个视频专属推荐问题，以及由用户控制的 Tavily 联网搜索。
 - 发布版本的所有 AI 功能都使用 DeepSeek V4 Flash。其他服务需要修改本地代码，不属于发布版本的支持范围。
 
-Shorts、直播、私密视频、受访问限制的视频，以及没有原生字幕的视频可能无法使用。目前没有测试 Firefox、Safari、移动浏览器或其他 Chromium 浏览器。
+Shorts、直播、私密视频和受访问限制的视频可能无法使用。目前没有测试 Firefox、Safari、移动浏览器或其他 Chromium 浏览器。
 
-YouTube Digest 强制使用 Supadata 的 `mode=native`，不会在没有原生字幕时请求 AI 生成转录，也不会在本地转录音频。
+YouTube Digest 始终先使用 Supadata 的 `mode=native`。只有在没有原生字幕时，界面才会提供 **Generate transcript from audio**。只有用户点击按钮并确认预计额度后，插件才会发送付费的 `mode=generate` 请求。取消确认不会发送生成请求。插件不会在本地转录音频。
+
+### Library 和 Vocabulary 行为
+
+Library 包含相互独立的 **Notes** 和 **Vocabulary** 视图。一条 Vocabulary 会保存选中文本、中文释义和结合视频的解释、原句上下文、视频标题与时间戳。对较短的英文单词或短语，DeepSeek 还可能生成 IPA；对较短的中文词条，可能生成拼音。AI 生成的音标可能不完全准确，较长文本则会主动省略音标。Vocabulary 在本地最多保存 500 条。
+
+保存后的 Vocabulary 会高亮显示在所有视频中的精确匹配字幕，包括当前和以后打开的视频。匹配过程会限制复杂度，也不会把收藏内容当成 HTML 或可执行模式。点击发音按钮使用本地 Chrome 或系统语音。英文发音会优先使用本机已安装的 Samantha（`en-US`）；如果不可用，则使用原有的自动声音排序。发音不会发送或保存音频，但声音和准确度取决于设备已安装的语音。
+
+### Ask 行为
+
+Ask 只在当前视频内支持多轮追问。对话历史只保留在侧边栏内存中，不会持久化；切换视频或关闭侧边栏后会清空。每个视频恰好 3 个生成的推荐问题会在本地缓存。回答语言跟随最新问题。
+
+**Web** 开关默认关闭。Web 关闭时，普通问题不会联系 Tavily。选择 **推荐相关内容** 会为该次请求开启 Tavily。如果缺少 Tavily Key、Tavily 不可用或搜索失败，Ask 会降级为只基于视频的回答，不会阻断对话。
 
 ## Supadata 免费额度和请求成本
 
@@ -117,12 +143,18 @@ YouTube Digest 强制使用 Supadata 的 `mode=native`，不会在没有原生�
 [Supadata 字幕接口文档](https://docs.supadata.ai/get-transcript)说明了不同模式的计费方式：
 
 - 获取一次原生字幕消耗 **1 credit**，与视频时长无关。
-- AI 生成字幕每分钟消耗 **2 credits**。YouTube Digest 不会使用这条路径，因为它强制使用 `mode=native`。
+- AI 生成字幕每分钟消耗 **2 credits**。YouTube Digest 只会在用户明确确认后使用这条路径。
 - 如果没有可用原生字幕并返回 HTTP `206`，仍会消耗 **1 credit**。
 
-按照当前只获取原生字幕的方式，如果每次请求都成功，免费版每月大约可以查询 100 个视频。重试和没有字幕的查询也会消耗额度，所以实际成功数量可能更少。
+如果每次原生字幕请求都成功，免费版每月大约可以查询 100 个视频。重试、没有字幕的查询和用户选择的 AI 生成转录也会消耗额度，所以实际成功数量可能更少。
 
 DeepSeek 的额度与 Supadata 分开计算。DeepSeek 可能有自己的免费额度、限速或费用。YouTube Digest 不收款，也不转售 API 服务。建议为两个账号设置消费上限并定期查看用量。下方估算说明了当前 DeepSeek 翻译成本。
+
+## 可选 Tavily 联网搜索和费用
+
+只有你明确开启 Ask 的 **Web** 时，扩展才会从当前视频标题、你的问题和已有 Overview 派生搜索查询，然后使用你的 Tavily API Key 直接发送到 `https://api.tavily.com`。它使用 Basic Search，最多 5 个结果，不请求 Tavily answer，也不请求 raw content。只有验证过的来源 URL 会进入回答流程并显示为链接。网络内容只补充视频字幕，不会取代它。
+
+截至 2026 年 8 月 23 日，Tavily 官方[额度文档](https://docs.tavily.com/documentation/api-credits)显示免费账号每月有 **1,000 credits**，Basic Search 每次使用 **1 credit**，Advanced Search 每次使用 **2 credits**。YouTube Digest 使用 Basic Search，因此每次开启的搜索通常使用一个 Tavily credit。价格可能变化，使用这些数字前请查看最新 [API 文档](https://docs.tavily.com/documentation/api-reference/introduction)。Tavily 是可选的，使用你从 [Tavily 控制台](https://app.tavily.com/home)获取的 Key，并按 [Tavily 隐私政策](https://tavily.com/privacy)处理搜索。
 
 ## DeepSeek V4 Flash 翻译成本估算
 
@@ -148,7 +180,7 @@ YouTube Digest 使用原生 HTML、CSS 和 JavaScript，没有构建步骤，很
 
 - 增加更多翻译语言，并让每个人选择自己的学习语言。
 - 为课程、访谈、教程、测评或研究视频增加自定义总结模板。
-- 增加生词本，保存单词、原句、解释和视频时间戳。
+- 为现有单词本增加间隔复习、标签或自定义复习计划。
 - 把笔记和生词导出到 Markdown、CSV、Anki 或其他学习工具。
 - 增加个人主题筛选，只突出与你目标相关的章节。
 - 增加本地模型选项，获得不同的隐私和成本方案。
@@ -162,12 +194,13 @@ YouTube Digest 使用原生 HTML、CSS 和 JavaScript，没有构建步骤，很
 
 YouTube Digest 会直接从扩展向服务商发送请求：
 
-1. 把标准化的 YouTube 视频地址发送给 Supadata，用于获取原生字幕。
-2. 当你使用 AI 功能时，把字幕和相关视频信息发送给 DeepSeek。
-3. 翻译或讲解等功能只发送当前需要的内容，例如选中的文本和上下文，或少量字幕分段。
-4. API Key、设置、笔记和最近缓存保存在 Chrome 本地。
+1. 把标准化的 YouTube 视频地址发送给 Supadata，用于获取原生字幕。如果没有原生字幕，只有当你选择 **Generate transcript from audio** 并确认预计额度后，Supadata 才会处理视频音轨。
+2. Overview 和 Ask 会把字幕和视频信息发送给 DeepSeek，Ask 只带有限的对话历史。Explain 和 Vocabulary 会发送选中文本和附近上下文；翻译只发送请求的内容。
+3. Ask Web 开启时，把从标题、问题和可用 Overview 派生的查询直接发送给 Tavily。Web 默认关闭，保持关闭时不会向 Tavily 发送请求。
+4. API Key、设置、Notes、Vocabulary、每个视频恰好 3 个缓存的推荐问题，以及字幕、概览和翻译缓存保存在 Chrome 本地。Ask 对话历史不会持久化。
+5. Vocabulary 发音使用本地 Chrome 或系统语音，不会发送或保存音频。
 
-YouTube Digest 没有账号系统、广告、分析统计或行为追踪。Supadata 和 DeepSeek 仍会按照各自的条款和隐私政策处理数据。详情请查看 [PRIVACY.md](PRIVACY.md)。
+YouTube Digest 没有账号系统、广告、分析统计或行为追踪。Supadata、DeepSeek 和可选 Tavily 请求仍会按照各自的条款和隐私政策处理数据。详情请查看 [PRIVACY.md](PRIVACY.md)。
 
 ## 常见问题
 
@@ -188,17 +221,18 @@ YouTube Digest 没有账号系统、广告、分析统计或行为追踪。Supad
 
 ### YouTube Digest 提示需要设置
 
-- 打开 **Settings**，保存 Supadata Key 和 DeepSeek Key。
+- 打开 **Settings**，保存 Supadata Key 和 DeepSeek Key。只有需要 Ask 联网搜索时才添加 Tavily Key。
 - 发布版本固定使用 DeepSeek V4 Flash，没有需要填写的 Base URL 或 Model 字段。
 - 如果设置提示旧的自定义服务已移除，请重新填写 DeepSeek Key。旧 AI Key 已安全清除，避免被错误用于 DeepSeek。
 
 ### 找不到字幕
 
-- 确认视频是公开的，并且有原生字幕。
+- 确认视频是公开的，并且 Supadata 可以访问。
 - 检查 Supadata Key、剩余额度、限速和账号状态。
 - 没有字幕的查询和手动重试也可能消耗额度。
+- 如果视频没有原生字幕，选择 **Generate transcript from audio** 并查看预计成本。只有确认后才会发送请求，生成结果会缓存在本地供后续复用。
 
-YouTube Digest 不会自动改用 AI 生成字幕。
+YouTube Digest 永远不会自动开始付费的音轨转录。
 
 ### AI 请求失败
 
@@ -206,6 +240,7 @@ YouTube Digest 不会自动改用 AI 生成字幕。
 - `429` 通常表示达到了 DeepSeek 服务限速或消费上限。
 - 确认 Key 来自上方链接的 DeepSeek 开放平台账号，并且账号有可用额度。
 - 如果你把本地副本改成了其他模型，请再次使用设置中的自定义 prompt，让编程 Agent 检查本地实现。
+- 如果只有 Web 搜索失败，请检查可选 Tavily Key 和剩余额度。Ask 应继续返回只基于视频的回答。
 
 不要在对话、截图或日志中分享 API Key、私密字幕或个人笔记。
 

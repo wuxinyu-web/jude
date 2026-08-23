@@ -177,6 +177,148 @@ test("Transcript header exposes and wires Original, Chinese, and bilingual modes
   assert.match(js, /Original \(\$\{language\}\)/);
 });
 
+test("Overview adds a full summary, matching language modes, and sticky controls", () => {
+  const html = read("sidepanel.html");
+  const css = read("sidepanel.css");
+  const js = read("sidepanel.js");
+  const analysisPrompt = read("prompts/analysis.md");
+
+  assert.match(html, /id="overviewSummary"/);
+  assert.match(html, /data-overview-mode="original"[\s\S]*?>Original</);
+  assert.match(html, /data-overview-mode="zh"[\s\S]*?>\u4e2d\u6587</);
+  assert.match(html, /data-overview-mode="bilingual"[\s\S]*?>\u53cc\u8bed</);
+  assert.match(
+    html,
+    /class="sticky-control-row"[\s\S]*?id="transcriptModeControl"[\s\S]*?id="copyTranscriptBtn"[\s\S]*?id="exportTranscriptBtn"/,
+  );
+  assert.match(css, /\.sticky-control-row\s*\{[\s\S]*?position: sticky;[\s\S]*?top: -24px;/);
+  assert.match(js, /contentType: "overviewBatch"/);
+  assert.match(js, /handleOverviewModeChange\(button\.dataset\.overviewMode\)/);
+  assert.match(analysisPrompt, /"summary": "A concise summary of the entire video"/);
+});
+
+test("Overview analysis validates summary text and exposes translatable fields", () => {
+  const { validateAndFixTimestamps } = loadBackgroundHelpers();
+  const analysis = validateAndFixTimestamps(
+    {
+      summary: "  Whole video summary.  ",
+      chapters: [
+        {
+          title: "Opening",
+          summary: "Chapter detail",
+          timestampSeconds: 0,
+        },
+      ],
+      keyQuotes: [
+        { quote: "A useful quote", timestampSeconds: 5 },
+      ],
+    },
+    60,
+  );
+  assert.equal(analysis.summary, "Whole video summary.");
+
+  const { getOverviewTranslationSegments } = loadSidepanelHelpers();
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(getOverviewTranslationSegments(analysis))),
+    [
+      { id: "overview-summary", text: "Whole video summary." },
+      { id: "chapter-title-0", text: "Opening" },
+      { id: "chapter-summary-0", text: "Chapter detail" },
+      { id: "quote-0", text: "A useful quote" },
+    ],
+  );
+});
+
+test("Overview notes save the currently displayed language", () => {
+  const panel = read("sidepanel.js");
+  const background = read("background.js");
+  const styles = read("sidepanel.css");
+
+  assert.match(
+    panel,
+    /const noteText = getOverviewFieldDisplayText\(quote\.quote, fieldId\)/,
+  );
+  assert.match(
+    panel,
+    /action: "saveOverviewNote"[\s\S]*?noteText,[\s\S]*?rawText: quote\.quote,[\s\S]*?languageMode: currentOverviewMode/,
+  );
+  assert.match(
+    panel,
+    /currentOverviewMode !== "original" && !translatedText/,
+  );
+  assert.match(
+    panel,
+    /quoteTranslationReady[\s\S]*?disabled[\s\S]*?Translating…/,
+  );
+  assert.match(background, /message\.action === "saveOverviewNote"/);
+  assert.doesNotMatch(
+    background,
+    /handleAnalyzeTranscript\([\s\S]{0,240}message\.noteText/,
+  );
+  assert.match(styles, /\.note-text\s*\{[\s\S]*?white-space: pre-wrap;/);
+
+  const { buildOverviewQuoteNote } = loadBackgroundHelpers();
+  const chineseNote = buildOverviewQuoteNote(
+    {
+      videoId: "video-id",
+      videoTitle: "Video",
+      channelName: "Channel",
+      timestamp: 65,
+      noteText: "这是中文引用。",
+      rawText: "This is the original quote.",
+      languageMode: "zh",
+    },
+    "https://www.youtube.com/watch?v=video-id&t=65s",
+    1234,
+  );
+  assert.equal(chineseNote.text, "这是中文引用。");
+  assert.equal(chineseNote.rawText, "This is the original quote.");
+  assert.equal(chineseNote.languageMode, "zh");
+  assert.equal(chineseNote.timestamp, "1:05");
+
+  const bilingualNote = buildOverviewQuoteNote(
+    {
+      noteText: "Original quote.\n\n双语引用。",
+      languageMode: "bilingual",
+    },
+    "https://www.youtube.com/watch?v=video-id&t=0s",
+    1235,
+  );
+  assert.equal(bilingualNote.text, "Original quote.\n\n双语引用。");
+  assert.equal(bilingualNote.languageMode, "bilingual");
+});
+
+test("audio transcription stays native by default and requires explicit generation", () => {
+  const panelSource = read("sidepanel.js");
+  const backgroundSource = read("background.js");
+  const { normalizeTranscriptMode } = loadBackgroundHelpers();
+  const { buildAudioTranscriptionConfirmation } = loadSidepanelHelpers();
+
+  assert.equal(normalizeTranscriptMode(), "native");
+  assert.equal(normalizeTranscriptMode("auto"), "native");
+  assert.equal(normalizeTranscriptMode("generate"), "generate");
+  assert.match(
+    backgroundSource,
+    /apiUrl\.searchParams\.set\("mode", transcriptMode\)/,
+  );
+  assert.match(
+    panelSource,
+    /error === "NO_TRANSCRIPT"[\s\S]*?showMissingTranscriptError/,
+  );
+  assert.match(
+    panelSource,
+    /const confirmed = window\.confirm\([\s\S]*?if \(!confirmed\) return;[\s\S]*?mode: "generate"/,
+  );
+  assert.match(
+    buildAudioTranscriptionConfirmation(30 * 60),
+    /30 minutes[\s\S]*60 Supadata credits/,
+  );
+  assert.match(
+    buildAudioTranscriptionConfirmation(0),
+    /2 credits per video minute/,
+  );
+});
+
 test("semantic segmentation rebuilds sentences across caption boundaries", () => {
   const { groupTranscriptEntries } = loadSidepanelHelpers();
   const segments = groupTranscriptEntries(
@@ -279,6 +421,229 @@ test("translated-only omits English while bilingual renders aligned English and 
   assert.match(bilingual, /\u4e2d\u6587\u8bd1\u6587/);
 });
 
+test("Explain exposes English, Chinese, and bilingual display helpers", () => {
+  const html = read("sidepanel.js");
+  const prompt = read("prompts/explain.md");
+  const translationPrompt = read("prompts/translation.md");
+  const {
+    renderExplanationContent,
+    buildExplainContextFromSelection,
+  } = loadSidepanelHelpers();
+
+  assert.match(html, /data-explain-mode="english"[\s\S]*?>English</);
+  assert.match(html, /data-explain-mode="zh"[\s\S]*?>中文</);
+  assert.match(html, /data-explain-mode="bilingual"[\s\S]*?>双语</);
+  assert.match(html, /contentType: "explainBatch"/);
+  assert.match(prompt, /Respond in concise English only\./);
+  assert.match(translationPrompt, /^## Explanation translation$/m);
+
+  const english = renderExplanationContent(
+    "english",
+    "Explain <b>this</b> briefly.",
+    "用中文解释",
+    "",
+  );
+  const chinese = renderExplanationContent(
+    "zh",
+    "Explain <b>this</b> briefly.",
+    "用中文解释",
+    "",
+  );
+  const bilingual = renderExplanationContent(
+    "bilingual",
+    "Explain <b>this</b> briefly.",
+    "用中文解释",
+    "",
+  );
+  const failedChinese = renderExplanationContent(
+    "zh",
+    "English fallback",
+    "",
+    "Translation failed.",
+  );
+
+  assert.match(english, /Explain &lt;b&gt;this&lt;\/b&gt; briefly\./);
+  assert.doesNotMatch(english, /用中文解释/);
+  assert.match(chinese, /用中文解释/);
+  assert.doesNotMatch(chinese, /Explain &lt;b&gt;this&lt;\/b&gt; briefly\./);
+  assert.match(bilingual, /explain-source/);
+  assert.match(bilingual, /explain-translation/);
+  assert.match(bilingual, /Explain &lt;b&gt;this&lt;\/b&gt; briefly\./);
+  assert.match(bilingual, /用中文解释/);
+  assert.match(failedChinese, /Translation failed\./);
+  assert.match(failedChinese, />Retry</);
+
+  const context = buildExplainContextFromSelection(
+    "中文片段",
+    { dataset: { segmentId: "segment-1-5000", segmentIndex: "1" } },
+    [
+      { id: "segment-0-0", text: "First source sentence." },
+      { id: "segment-1-5000", text: "Second source sentence." },
+      { id: "segment-2-9000", text: "Third source sentence." },
+    ],
+    "First source sentence. Second source sentence. Third source sentence.",
+  );
+  assert.match(context, /First source sentence\./);
+  assert.match(context, /Second source sentence\./);
+  assert.match(context, /Third source sentence\./);
+  assert.doesNotMatch(context, /中文片段/);
+
+  const fallbackContext = buildExplainContextFromSelection(
+    "selected phrase",
+    null,
+    [],
+    "Before selected phrase after.",
+  );
+  assert.equal(fallbackContext, "Before selected phrase after.");
+});
+
+test("Explain translation is lazy, cached, retryable, and ignores late replies", async () => {
+  const {
+    createExplanationTranslationState,
+    ensureExplanationTranslation,
+    renderExplanationContent,
+  } = loadSidepanelHelpers();
+
+  let resolveTranslation;
+  let requestCount = 0;
+  const state = createExplanationTranslationState("English explanation.");
+  const sendMessage = (message) => {
+    requestCount += 1;
+    assert.equal(message.action, "translateContent");
+    assert.equal(message.contentType, "explainBatch");
+    assert.deepEqual(JSON.parse(JSON.stringify(message.content.segments)), [
+      { id: "explain-0", text: "English explanation." },
+    ]);
+    return new Promise((resolve) => {
+      resolveTranslation = resolve;
+    });
+  };
+
+  const first = ensureExplanationTranslation(state, {
+    sendMessage,
+    videoTitle: "Video",
+    isCurrent: () => true,
+  });
+  const duplicate = ensureExplanationTranslation(state, {
+    sendMessage,
+    videoTitle: "Video",
+    isCurrent: () => true,
+  });
+  assert.strictEqual(duplicate, first);
+  assert.equal(requestCount, 1);
+
+  resolveTranslation({
+    success: true,
+    translatedContent: {
+      segments: [{ id: "explain-0", text: "中文解释。" }],
+    },
+  });
+  await first;
+  assert.equal(state.chinese, "中文解释。");
+  await ensureExplanationTranslation(state, {
+    sendMessage,
+    videoTitle: "Video",
+    isCurrent: () => true,
+  });
+  assert.equal(requestCount, 1, "cached Chinese must not make another request");
+
+  let attempt = 0;
+  const retryState = createExplanationTranslationState("Keep this English.");
+  const retrySend = async () => {
+    attempt += 1;
+    return attempt === 1
+      ? { success: false, error: "Temporary failure." }
+      : {
+          success: true,
+          translatedContent: {
+            segments: [{ id: "explain-0", text: "重试成功。" }],
+          },
+        };
+  };
+  await ensureExplanationTranslation(retryState, {
+    sendMessage: retrySend,
+    isCurrent: () => true,
+  });
+  assert.equal(retryState.english, "Keep this English.");
+  assert.equal(retryState.translationError, "Temporary failure.");
+  const failed = renderExplanationContent(
+    "zh",
+    retryState.english,
+    retryState.chinese,
+    retryState.translationError,
+  );
+  assert.match(failed, /Keep this English\./);
+  assert.match(failed, />Retry</);
+  await ensureExplanationTranslation(retryState, {
+    sendMessage: retrySend,
+    isCurrent: () => true,
+  });
+  assert.equal(attempt, 1, "language switching alone must not retry a failure");
+  await ensureExplanationTranslation(retryState, {
+    sendMessage: retrySend,
+    isCurrent: () => true,
+    retry: true,
+  });
+  assert.equal(attempt, 2);
+  assert.equal(retryState.chinese, "重试成功。");
+
+  let active = true;
+  let resolveLate;
+  const lateState = createExplanationTranslationState("Do not replace me.");
+  const late = ensureExplanationTranslation(lateState, {
+    sendMessage: () =>
+      new Promise((resolve) => {
+        resolveLate = resolve;
+      }),
+    isCurrent: () => active,
+  });
+  active = false;
+  resolveLate({
+    success: true,
+    translatedContent: {
+      segments: [{ id: "explain-0", text: "迟到翻译。" }],
+    },
+  });
+  await late;
+  assert.equal(lateState.chinese, "", "detached or replaced modal ignores late data");
+});
+
+test("Explain translation stays bound to the video that opened the modal", async () => {
+  const {
+    createExplanationTranslationState,
+    ensureExplanationTranslation,
+  } = loadSidepanelHelpers();
+  let activeVideoId = "video-a";
+  let resolveTranslation;
+  let requestTitle = "";
+  const state = createExplanationTranslationState(
+    "English explanation.",
+    "video-a",
+    "Video A title",
+  );
+
+  const pending = ensureExplanationTranslation(state, {
+    sendMessage: (message) => {
+      requestTitle = message.videoTitle;
+      return new Promise((resolve) => {
+        resolveTranslation = resolve;
+      });
+    },
+    isCurrent: () => activeVideoId === state.videoId,
+  });
+  assert.equal(requestTitle, "Video A title");
+
+  activeVideoId = "video-b";
+  resolveTranslation({
+    success: true,
+    translatedContent: {
+      segments: [{ id: "explain-0", text: "旧视频翻译。" }],
+    },
+  });
+  await pending;
+  assert.equal(state.chinese, "", "a new active video invalidates the old modal");
+});
+
 test("subtitle formatting tags render in original and translated segment text", () => {
   const { renderTranscriptSegmentContent } = loadSidepanelHelpers();
   const html = renderTranscriptSegmentContent(
@@ -309,7 +674,7 @@ test("subtitle markup renderer keeps attributed and arbitrary HTML escaped", () 
   assert.doesNotMatch(html, /<img\b|<i\s+onclick|<script\b/);
 });
 
-test("background rejects unsupported language fallthrough and malformed batches", () => {
+test("background accepts explanation batches and rejects unknown translation types", async () => {
   const source = read("background.js");
   const { validateTranscriptBatchRequest } = loadBackgroundHelpers();
   assert.match(source, /targetLanguage !== "zh"/);
@@ -327,6 +692,46 @@ test("background rejects unsupported language fallthrough and malformed batches"
       }),
     /unique and stable/,
   );
+
+  const helpers = loadBackgroundHelpers({
+    fetchImpl: async (url) => {
+      if (String(url).startsWith("chrome-extension://")) {
+        return { ok: true, text: async () => read("prompts/translation.md") };
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          choices: [
+            {
+              message: {
+                content:
+                  '{"segments":[{"id":"explain-0","text":"简短中文解释。"}]}',
+              },
+            },
+          ],
+        }),
+      };
+    },
+  });
+  const accepted = await helpers.handleTranslateContent(
+    {
+      segments: [{ id: "explain-0", text: "Explain this in Chinese." }],
+    },
+    "explainBatch",
+    "zh",
+    "Video",
+  );
+  assert.equal(accepted.success, true);
+  assert.equal(accepted.translatedContent.segments[0].text, "简短中文解释。");
+
+  const rejected = await helpers.handleTranslateContent(
+    { segments: [{ id: "unknown-0", text: "Text" }] },
+    "unknownBatch",
+    "zh",
+    "Video",
+  );
+  assert.equal(rejected.success, false);
+  assert.match(rejected.error, /Unsupported translation content type/);
 });
 
 test("all AI product requests use DeepSeek non-thinking and JSON behavior", async () => {
@@ -358,13 +763,16 @@ test("all AI product requests use DeepSeek non-thinking and JSON behavior", asyn
   const backgroundSource = read("background.js");
   assert.equal(
     (backgroundSource.match(/await requestAiCompletion\(\{/g) || []).length,
-    4,
+    7,
   );
   assert.doesNotMatch(backgroundSource, /disableThinking/);
   for (const callPath of [
     "handleAnalyzeTranscript",
     "cleanupNoteText",
     "handleExplainSelection",
+    "handleSuggestVideoQuestions",
+    "handleAskVideo",
+    "saveVocabularyMutation",
     "callAiTranslation",
   ]) {
     assert.match(
