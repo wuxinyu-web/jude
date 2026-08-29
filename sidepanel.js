@@ -443,7 +443,7 @@ function restorePendingTranscriptViewState(snapshot) {
       ? savedScrollTop
       : 0;
   const hasSavedPosition =
-    pendingTranscriptViewState.hasSavedPosition === true && scrollTop > 0;
+    pendingTranscriptViewState.hasSavedPosition === true;
 
   clearTranscriptViewStateSaveTimer();
   isRestoringTranscriptView = true;

@@ -475,6 +475,34 @@ test("saved Transcript position loads and restores only for its video generation
   assert.equal(contentArea.scrollTop, 17, "stale video state must be ignored");
 });
 
+test("a saved Transcript position at the top still pauses playback following", async () => {
+  const harness = loadTranscriptReadingPositionLifecycleHarness({
+    initialSessionValue: {
+      ytd_transcript_view_state: {
+        "video-A": { scrollTop: 0, updatedAt: 1 },
+      },
+    },
+  });
+  const { helpers, contentArea, followPlaybackButton } = harness;
+  helpers.setTranscriptReadingPositionTestState({
+    videoId: "video-A",
+    generation: 5,
+    activeVideoId: "video-A",
+    autoScrollEnabled: true,
+  });
+  const snapshot = { videoId: "video-A", generation: 5 };
+
+  contentArea.scrollTop = 73;
+  assert.equal(await helpers.loadPendingTranscriptViewState(snapshot), true);
+  assert.equal(helpers.restorePendingTranscriptViewState(snapshot), true);
+  assert.equal(contentArea.scrollTop, 0);
+  assert.equal(
+    helpers.getTranscriptReadingPositionTestState().autoScrollEnabled,
+    false,
+  );
+  assert.equal(followPlaybackButton.style.display, "block");
+});
+
 test("missing or invalid Transcript state falls back safely to the top", () => {
   const harness = loadTranscriptReadingPositionLifecycleHarness();
   const { helpers, contentArea } = harness;
