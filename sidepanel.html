@@ -116,6 +116,44 @@
                 </button>
               </div>
             </div>
+            <div class="transcript-search" role="search">
+              <label class="sr-only" for="transcriptSearchInput">Search transcript</label>
+              <div class="transcript-search-field">
+                <input
+                  id="transcriptSearchInput"
+                  type="search"
+                  maxlength="200"
+                  autocomplete="off"
+                  placeholder="Search transcript"
+                />
+                <button
+                  class="transcript-search-clear"
+                  id="transcriptSearchClear"
+                  type="button"
+                  aria-label="Clear transcript search"
+                  disabled
+                >&#215;</button>
+              </div>
+              <span
+                class="transcript-search-count"
+                id="transcriptSearchCount"
+                aria-live="polite"
+              >0 / 0</span>
+              <button
+                class="transcript-search-nav"
+                id="transcriptSearchPrevious"
+                type="button"
+                aria-label="Previous search result"
+                disabled
+              >&#8593;</button>
+              <button
+                class="transcript-search-nav"
+                id="transcriptSearchNext"
+                type="button"
+                aria-label="Next search result"
+                disabled
+              >&#8595;</button>
+            </div>
             <div id="transcriptList"></div>
           </div>
         </div>

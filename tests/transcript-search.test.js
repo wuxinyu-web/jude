@@ -8,6 +8,14 @@ const source = fs.readFileSync(
   path.resolve(__dirname, "..", "sidepanel.js"),
   "utf8",
 );
+const html = fs.readFileSync(
+  path.resolve(__dirname, "..", "sidepanel.html"),
+  "utf8",
+);
+const styles = fs.readFileSync(
+  path.resolve(__dirname, "..", "sidepanel.css"),
+  "utf8",
+);
 
 function plain(value) {
   return JSON.parse(JSON.stringify(value));
@@ -197,4 +205,176 @@ test("clearing Transcript search marks preserves vocabulary and inline markup", 
     ["first", "second"],
   );
   assert.equal(normalized, 2);
+});
+
+test("Transcript search exposes labelled bounded controls and live result count", () => {
+  assert.match(
+    html,
+    /<label[^>]*for="transcriptSearchInput"[^>]*>\s*Search transcript\s*<\/label>/,
+  );
+  assert.match(
+    html,
+    /<input[^>]*id="transcriptSearchInput"[^>]*type="search"[^>]*maxlength="200"/,
+  );
+  assert.match(html, /id="transcriptSearchClear"[^>]*aria-label="Clear transcript search"/);
+  assert.match(html, /id="transcriptSearchCount"[^>]*aria-live="polite"/);
+  assert.match(html, /id="transcriptSearchPrevious"[^>]*aria-label="Previous search result"/);
+  assert.match(html, /id="transcriptSearchNext"[^>]*aria-label="Next search result"/);
+});
+
+test("Transcript search state is video-scoped and navigation wraps", () => {
+  const {
+    createTranscriptSearchState,
+    getNextTranscriptSearchIndex,
+  } = loadSearchHelpers();
+  const state = createTranscriptSearchState("video-A");
+
+  assert.deepEqual(plain(state), {
+    videoId: "video-A",
+    query: "",
+    matches: [],
+    currentIndex: -1,
+  });
+  assert.equal(getNextTranscriptSearchIndex(-1, 3, 1), 0);
+  assert.equal(getNextTranscriptSearchIndex(2, 3, 1), 0);
+  assert.equal(getNextTranscriptSearchIndex(0, 3, -1), 2);
+  assert.equal(getNextTranscriptSearchIndex(0, 0, 1), -1);
+});
+
+test("Transcript search only accepts displayed transcript copy nodes", () => {
+  const { isTranscriptSearchTextNodeEligible } = loadSearchHelpers();
+  const textNode = (matchedSelector) => ({
+    nodeValue: "visible text",
+    parentElement: {
+      closest(selector) {
+        if (selector === ".transcript-entry") return {};
+        if (
+          selector ===
+          ".transcript-text, .transcript-original, .transcript-translation"
+        ) {
+          return matchedSelector === "copy" ? {} : null;
+        }
+        return selector.includes(matchedSelector) ? {} : null;
+      },
+    },
+  });
+
+  assert.equal(isTranscriptSearchTextNodeEligible(textNode("copy")), true);
+  for (const excluded of [
+    ".transcript-time",
+    "button",
+    "a",
+    ".transcript-row-actions",
+    ".translation-pending",
+    ".translation-error",
+    ".transcript-search-highlight",
+  ]) {
+    assert.equal(
+      isTranscriptSearchTextNodeEligible(textNode(excluded)),
+      false,
+      `expected ${excluded} to be skipped`,
+    );
+  }
+  assert.equal(
+    isTranscriptSearchTextNodeEligible({ nodeValue: "", parentElement: null }),
+    false,
+  );
+});
+
+test("Transcript search creates marks with textContent and a DocumentFragment", () => {
+  const { replaceTranscriptSearchTextNode } = loadSearchHelpers();
+  const calls = [];
+  const fragment = {
+    children: [],
+    appendChild(child) {
+      this.children.push(child);
+    },
+  };
+  const ownerDocument = {
+    createDocumentFragment() {
+      calls.push("fragment");
+      return fragment;
+    },
+    createTextNode(text) {
+      calls.push(["text", text]);
+      return { nodeType: 3, textContent: String(text) };
+    },
+    createElement(tagName) {
+      calls.push(["element", tagName]);
+      return { tagName: tagName.toUpperCase(), className: "", textContent: "" };
+    },
+  };
+  const textNode = {
+    nodeValue: "alpha beta alpha",
+    ownerDocument,
+    replaceWith(value) {
+      this.replacement = value;
+    },
+  };
+
+  const marks = replaceTranscriptSearchTextNode(textNode, [
+    { start: 0, end: 5 },
+    { start: 11, end: 16 },
+  ]);
+
+  assert.equal(textNode.replacement, fragment);
+  assert.deepEqual(plain(marks.map((mark) => mark.textContent)), ["alpha", "alpha"]);
+  assert.ok(marks.every((mark) => mark.className === "transcript-search-highlight"));
+  assert.equal(calls.filter((call) => call === "fragment").length, 1);
+  assert.equal(calls.some((call) => call[0] === "element" && call[1] === "mark"), true);
+});
+
+test("Transcript search wires typing, Enter navigation, Shift+Enter, and Escape", () => {
+  assert.match(source, /transcriptSearchInput[\s\S]*addEventListener\("input"/);
+  assert.match(source, /event\.key === "Enter"[\s\S]*event\.shiftKey/);
+  assert.match(source, /event\.key === "Escape"[\s\S]*clearTranscriptSearch/);
+  assert.match(source, /transcriptSearchPrevious[\s\S]*navigateTranscriptSearch\(-1\)/);
+  assert.match(source, /transcriptSearchNext[\s\S]*navigateTranscriptSearch\(1\)/);
+});
+
+test("Transcript search centers the current result and pauses playback follow", () => {
+  assert.match(
+    source,
+    /autoScrollEnabled\s*=\s*false;[\s\S]*followPlaybackBtn[\s\S]*display\s*=\s*"block"/,
+  );
+  assert.match(
+    source,
+    /scrollIntoView\(\{\s*behavior:\s*"smooth",\s*block:\s*"center"\s*\}\)/,
+  );
+  assert.match(styles, /\.transcript-search-highlight\.current-search-result/);
+  assert.match(
+    source,
+    /function startPlaybackTracking\([\s\S]*transcriptSearchState\.query\.trim\(\)[\s\S]*autoScrollEnabled\s*=\s*false/,
+  );
+});
+
+test("Transcript rerenders rebuild vocabulary first and then active search", () => {
+  assert.match(
+    source,
+    /function refreshTranscriptHighlights[\s\S]*clearTranscriptSearchHighlights[\s\S]*applyVocabularyHighlights[\s\S]*applyTranscriptSearchHighlights/,
+  );
+  assert.match(source, /function renderTranscript\([\s\S]*refreshTranscriptHighlights\(transcriptList\)/);
+  assert.match(source, /function renderTranscriptModeRows[\s\S]*refreshTranscriptHighlights\(transcriptList\)/);
+  assert.match(source, /function updateTranslatedRow[\s\S]*refreshTranscriptHighlights\(transcriptList\)/);
+  assert.match(source, /function refreshVocabularyEntries[\s\S]*refreshTranscriptHighlights\(\)/);
+});
+
+test("Transcript search resets on video changes and never seeks or calls a provider", () => {
+  assert.match(
+    source,
+    /function startDigest\(videoId, videoUrl\)[\s\S]*resetTranscriptSearchForVideo\(videoId\)/,
+  );
+  const searchBlock = source.slice(
+    source.indexOf("function createTranscriptSearchState"),
+    source.indexOf("// ============================================================\n// CACHING"),
+  );
+  assert.doesNotMatch(searchBlock, /seekTo\(|sendMessage\(/);
+});
+
+test("Transcript search highlight visually wins inside Vocabulary highlight", () => {
+  assert.match(styles, /\.transcript-search-highlight\s*\{[^}]*background:\s*#ffb000;/);
+  assert.match(
+    styles,
+    /\.vocabulary-highlight \.transcript-search-highlight\s*\{[^}]*background:\s*#ffb000;/,
+  );
 });

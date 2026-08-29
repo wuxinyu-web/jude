@@ -68,6 +68,7 @@ const TRANSCRIPT_SEARCH_LIMITS = Object.freeze({
   maxTextLength: 12_000,
   maxMatches: 1_000,
 });
+let transcriptSearchState = createTranscriptSearchState();
 
 // --- Ask state ---
 // Messages intentionally remain in memory. Only generated suggestions are
@@ -777,6 +778,28 @@ function setupEventListeners() {
   document
     .getElementById("exportTranscriptBtn")
     ?.addEventListener("click", exportTranscript);
+  const transcriptSearchInput = document.getElementById("transcriptSearchInput");
+  transcriptSearchInput?.addEventListener("input", () => {
+    setTranscriptSearchQuery(transcriptSearchInput.value, { scroll: true });
+  });
+  transcriptSearchInput?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      navigateTranscriptSearch(event.shiftKey ? -1 : 1);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      clearTranscriptSearch();
+    }
+  });
+  document
+    .getElementById("transcriptSearchClear")
+    ?.addEventListener("click", clearTranscriptSearch);
+  document
+    .getElementById("transcriptSearchPrevious")
+    ?.addEventListener("click", () => navigateTranscriptSearch(-1));
+  document
+    .getElementById("transcriptSearchNext")
+    ?.addEventListener("click", () => navigateTranscriptSearch(1));
   document.querySelectorAll(".transcript-mode-btn").forEach((button) => {
     if (button.dataset.transcriptMode) {
       button.addEventListener("click", () => {
@@ -977,6 +1000,8 @@ function extractVideoId(url) {
 // ============================================================
 
 async function startDigest(videoId, videoUrl) {
+  resetTranscriptSearchForVideo(videoId);
+
   if (videoId !== askState.videoId) {
     resetAskStateForVideo(askState, videoId);
     renderAskUi();
@@ -1498,7 +1523,7 @@ function renderTranscript() {
     transcriptList.appendChild(div);
   });
 
-  applyVocabularyHighlights(transcriptList);
+  refreshTranscriptHighlights(transcriptList);
 
   // Start tracking video playback for auto-scroll
   startPlaybackTracking();
@@ -3194,7 +3219,7 @@ async function refreshVocabularyEntries(requestSnapshot = null) {
     vocabularyEntries = result?.success && Array.isArray(result.vocabulary)
       ? result.vocabulary
       : [];
-    applyVocabularyHighlights();
+    refreshTranscriptHighlights();
     if (currentLibraryView === "vocabulary") {
       renderVocabularyForCurrentFilter();
     }
@@ -3573,6 +3598,227 @@ function buildNormalizedVocabularyText(value, maxLength) {
 
 function isLatinWordCharacter(character) {
   return Boolean(character && /[a-z0-9_]/i.test(character));
+}
+
+function createTranscriptSearchState(videoId = null) {
+  return {
+    videoId: videoId || null,
+    query: "",
+    matches: [],
+    currentIndex: -1,
+  };
+}
+
+function getNextTranscriptSearchIndex(currentIndex, matchCount, direction) {
+  if (!Number.isInteger(matchCount) || matchCount <= 0) return -1;
+  const step = direction < 0 ? -1 : 1;
+  const start = Number.isInteger(currentIndex) ? currentIndex : -1;
+  return (start + step + matchCount) % matchCount;
+}
+
+function isTranscriptSearchTextNodeEligible(node) {
+  const parent = node?.parentElement;
+  if (!parent || !String(node.nodeValue || "").trim()) return false;
+  if (
+    parent.closest(
+      ".transcript-search-highlight, .transcript-time, button, a, .transcript-row-actions, .translation-pending, .translation-error",
+    )
+  ) {
+    return false;
+  }
+  if (!parent.closest(".transcript-entry")) return false;
+  return Boolean(
+    parent.closest(
+      ".transcript-text, .transcript-original, .transcript-translation",
+    ),
+  );
+}
+
+function replaceTranscriptSearchTextNode(textNode, matches) {
+  if (!textNode || !Array.isArray(matches) || !matches.length) return [];
+  const sourceText = String(textNode.nodeValue || "");
+  const ownerDocument = textNode.ownerDocument || document;
+  const fragment = ownerDocument.createDocumentFragment();
+  const marks = [];
+  let cursor = 0;
+
+  matches.forEach((match) => {
+    const start = Number(match?.start);
+    const end = Number(match?.end);
+    if (
+      !Number.isInteger(start) ||
+      !Number.isInteger(end) ||
+      start < cursor ||
+      end <= start ||
+      end > sourceText.length
+    ) {
+      return;
+    }
+    if (start > cursor) {
+      fragment.appendChild(ownerDocument.createTextNode(sourceText.slice(cursor, start)));
+    }
+    const mark = ownerDocument.createElement("mark");
+    mark.className = "transcript-search-highlight";
+    mark.textContent = sourceText.slice(start, end);
+    fragment.appendChild(mark);
+    marks.push(mark);
+    cursor = end;
+  });
+
+  if (!marks.length) return [];
+  if (cursor < sourceText.length) {
+    fragment.appendChild(ownerDocument.createTextNode(sourceText.slice(cursor)));
+  }
+  textNode.replaceWith(fragment);
+  return marks;
+}
+
+function updateTranscriptSearchControls() {
+  const matchCount = transcriptSearchState.matches.length;
+  const currentNumber = matchCount ? transcriptSearchState.currentIndex + 1 : 0;
+  const count = document.getElementById("transcriptSearchCount");
+  const clear = document.getElementById("transcriptSearchClear");
+  const previous = document.getElementById("transcriptSearchPrevious");
+  const next = document.getElementById("transcriptSearchNext");
+  if (count) count.textContent = `${currentNumber} / ${matchCount}`;
+  if (clear) clear.disabled = !transcriptSearchState.query.trim();
+  if (previous) previous.disabled = matchCount === 0;
+  if (next) next.disabled = matchCount === 0;
+}
+
+function pauseTranscriptAutoFollowForSearch() {
+  autoScrollEnabled = false;
+  const followPlaybackBtn = document.getElementById("followPlaybackBtn");
+  if (followPlaybackBtn) followPlaybackBtn.style.display = "block";
+}
+
+function selectTranscriptSearchResult(index, { scroll = false } = {}) {
+  const matches = transcriptSearchState.matches;
+  if (!matches.length) {
+    transcriptSearchState.currentIndex = -1;
+    updateTranscriptSearchControls();
+    return false;
+  }
+
+  const boundedIndex = Math.min(Math.max(Number(index) || 0, 0), matches.length - 1);
+  transcriptSearchState.currentIndex = boundedIndex;
+  matches.forEach((mark, markIndex) => {
+    const current = markIndex === boundedIndex;
+    mark.classList?.toggle("current-search-result", current);
+    if (current) mark.setAttribute?.("aria-current", "true");
+    else mark.removeAttribute?.("aria-current");
+  });
+  updateTranscriptSearchControls();
+
+  const currentMark = matches[boundedIndex];
+  if (scroll && currentMark?.scrollIntoView) {
+    pauseTranscriptAutoFollowForSearch();
+    lastAutoScrollTime = Date.now();
+    currentMark.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+  return true;
+}
+
+function applyTranscriptSearchHighlights(
+  root = document.getElementById("transcriptList"),
+  { scrollCurrent = false } = {},
+) {
+  if (!root) return [];
+  const previousIndex = transcriptSearchState.currentIndex;
+  clearTranscriptSearchHighlights(root);
+  transcriptSearchState.matches = [];
+
+  if (
+    transcriptSearchState.videoId !== currentVideoId ||
+    !transcriptSearchState.query.trim()
+  ) {
+    transcriptSearchState.currentIndex = -1;
+    updateTranscriptSearchControls();
+    return [];
+  }
+
+  const ownerDocument = root.ownerDocument || document;
+  const walker = ownerDocument.createTreeWalker(
+    root,
+    NodeFilter.SHOW_TEXT,
+    {
+      acceptNode(node) {
+        return isTranscriptSearchTextNodeEligible(node)
+          ? NodeFilter.FILTER_ACCEPT
+          : NodeFilter.FILTER_REJECT;
+      },
+    },
+  );
+  const textNodes = [];
+  while (walker.nextNode()) textNodes.push(walker.currentNode);
+
+  for (const textNode of textNodes) {
+    const remaining =
+      TRANSCRIPT_SEARCH_LIMITS.maxMatches - transcriptSearchState.matches.length;
+    if (remaining <= 0) break;
+    const matches = findLiteralTranscriptMatches(
+      textNode.nodeValue || "",
+      transcriptSearchState.query,
+    ).slice(0, remaining);
+    transcriptSearchState.matches.push(
+      ...replaceTranscriptSearchTextNode(textNode, matches),
+    );
+  }
+
+  transcriptSearchState.currentIndex = transcriptSearchState.matches.length
+    ? Math.min(Math.max(previousIndex, 0), transcriptSearchState.matches.length - 1)
+    : -1;
+  selectTranscriptSearchResult(transcriptSearchState.currentIndex, {
+    scroll: scrollCurrent,
+  });
+  return transcriptSearchState.matches;
+}
+
+function refreshTranscriptHighlights(
+  root = document.getElementById("transcriptList"),
+) {
+  if (!root) return;
+  clearTranscriptSearchHighlights(root);
+  applyVocabularyHighlights(root);
+  applyTranscriptSearchHighlights(root);
+}
+
+function setTranscriptSearchQuery(value, { scroll = false } = {}) {
+  const query = String(value || "").slice(
+    0,
+    TRANSCRIPT_SEARCH_LIMITS.maxQueryLength,
+  );
+  transcriptSearchState.query = query;
+  transcriptSearchState.currentIndex = query.trim() ? 0 : -1;
+  applyTranscriptSearchHighlights(document.getElementById("transcriptList"), {
+    scrollCurrent: scroll && Boolean(query.trim()),
+  });
+}
+
+function navigateTranscriptSearch(direction) {
+  const nextIndex = getNextTranscriptSearchIndex(
+    transcriptSearchState.currentIndex,
+    transcriptSearchState.matches.length,
+    direction,
+  );
+  return selectTranscriptSearchResult(nextIndex, { scroll: true });
+}
+
+function clearTranscriptSearch() {
+  clearTranscriptSearchHighlights();
+  transcriptSearchState = createTranscriptSearchState(currentVideoId);
+  const input = document.getElementById("transcriptSearchInput");
+  if (input) input.value = "";
+  updateTranscriptSearchControls();
+}
+
+function resetTranscriptSearchForVideo(videoId) {
+  if (transcriptSearchState.videoId === (videoId || null)) return;
+  clearTranscriptSearchHighlights();
+  transcriptSearchState = createTranscriptSearchState(videoId);
+  const input = document.getElementById("transcriptSearchInput");
+  if (input) input.value = "";
+  updateTranscriptSearchControls();
 }
 
 /**
@@ -4075,8 +4321,14 @@ function startPlaybackTracking() {
   // Don't restart if already tracking (preserves user's auto-scroll state)
   if (autoScrollInterval) return;
 
-  autoScrollEnabled = true;
-  document.getElementById("followPlaybackBtn").style.display = "none";
+  const followPlaybackBtn = document.getElementById("followPlaybackBtn");
+  if (transcriptSearchState.query.trim()) {
+    autoScrollEnabled = false;
+    if (followPlaybackBtn) followPlaybackBtn.style.display = "block";
+  } else {
+    autoScrollEnabled = true;
+    if (followPlaybackBtn) followPlaybackBtn.style.display = "none";
+  }
 
   // Poll video time every 500ms
   autoScrollInterval = setInterval(() => playbackTrackingTick(), 500);
@@ -4475,7 +4727,7 @@ function renderTranscriptModeRows(segments, mode) {
     rows.push(div);
   });
 
-  applyVocabularyHighlights(transcriptList);
+  refreshTranscriptHighlights(transcriptList);
   startPlaybackTracking();
   return rows;
 }
@@ -4546,7 +4798,8 @@ function updateTranslatedRow(segment, index, alignedItem, generation) {
     });
   }
 
-  applyVocabularyHighlights(row);
+  const transcriptList = document.getElementById("transcriptList");
+  refreshTranscriptHighlights(transcriptList);
   syncTranscriptRowActions(row);
 }
 
@@ -4755,6 +5008,10 @@ globalThis.__YTD_TRANSCRIPT_TESTING__ = {
   alignTranslatedSegmentBatch,
   renderSubtitleInlineMarkup,
   renderTranscriptSegmentContent,
+  createTranscriptSearchState,
+  getNextTranscriptSearchIndex,
+  isTranscriptSearchTextNodeEligible,
+  replaceTranscriptSearchTextNode,
   findLiteralTranscriptMatches,
   clearTranscriptSearchHighlights,
   getOverviewTranslationSegments,

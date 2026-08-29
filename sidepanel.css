@@ -465,6 +465,92 @@ body {
   position: relative;
 }
 
+.transcript-search {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 12px;
+}
+
+.transcript-search-field {
+  position: relative;
+  min-width: 0;
+}
+
+.transcript-search-field input {
+  width: 100%;
+  height: 34px;
+  padding: 7px 34px 7px 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  outline: none;
+  background: var(--surface);
+  color: var(--text);
+  font: 500 12px/1.4 var(--font-body);
+}
+
+.transcript-search-field input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-dim);
+}
+
+.transcript-search-field input::placeholder {
+  color: var(--text-muted);
+}
+
+.transcript-search-clear {
+  position: absolute;
+  top: 50%;
+  right: 5px;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font: 500 18px/1 var(--font-body);
+}
+
+.transcript-search-count {
+  min-width: 42px;
+  color: var(--text-muted);
+  text-align: center;
+  white-space: nowrap;
+  font: 600 10.5px/1.3 var(--font-mono);
+}
+
+.transcript-search-nav {
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font: 700 14px/1 var(--font-body);
+}
+
+.transcript-search-clear:hover:not(:disabled),
+.transcript-search-nav:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.transcript-search-clear:focus-visible,
+.transcript-search-nav:focus-visible {
+  outline: 3px solid var(--accent-dim);
+  outline-offset: 1px;
+}
+
+.transcript-search-clear:disabled,
+.transcript-search-nav:disabled {
+  cursor: default;
+  opacity: 0.38;
+}
+
 /* ============================================================
    CHAPTERS
    ============================================================ */
@@ -1767,6 +1853,25 @@ body {
   background: var(--vocabulary-highlight-bg);
   color: var(--vocabulary-highlight-ink);
   box-shadow: inset 0 -2px 0 var(--vocabulary-highlight-edge);
+}
+
+.transcript-search-highlight {
+  padding: 0 1px;
+  border-radius: 2px;
+  background: #ffb000;
+  color: #241b00;
+  box-shadow: inset 0 -2px 0 #c77800;
+}
+
+.vocabulary-highlight .transcript-search-highlight {
+  background: #ffb000;
+  color: #241b00;
+  box-shadow: inset 0 -2px 0 #c77800;
+}
+
+.transcript-search-highlight.current-search-result {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 /* ============================================================
