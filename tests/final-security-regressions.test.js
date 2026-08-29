@@ -219,7 +219,12 @@ function createElement(id = "") {
   return element;
 }
 
-function loadSidepanelRaceHarness({ cacheGets, sendMessage }) {
+function loadSidepanelRaceHarness({
+  cacheGets,
+  sendMessage,
+  activeTabs = [],
+  backgroundYouTubeTabs = [],
+}) {
   const elements = new Map();
   const getElement = (id) => {
     if (!elements.has(id)) elements.set(id, createElement(id));
@@ -239,6 +244,8 @@ function loadSidepanelRaceHarness({ cacheGets, sendMessage }) {
     async remove() {},
   };
   const listeners = { addListener() {} };
+  let currentActiveTabs = activeTabs;
+  const tabCalls = { query: [], runtime: [], closes: 0 };
   const sandbox = {
     console,
     URL,
@@ -260,7 +267,9 @@ function loadSidepanelRaceHarness({ cacheGets, sendMessage }) {
     window: {
       getSelection: () => ({ toString: () => "", isCollapsed: true }),
       confirm: () => true,
-      close() {},
+      close() {
+        tabCalls.closes += 1;
+      },
       scrollY: 0,
       speechSynthesis: null,
     },
@@ -279,11 +288,28 @@ function loadSidepanelRaceHarness({ cacheGets, sendMessage }) {
     },
     chrome: {
       storage: { local: storage },
-      runtime: { onMessage: listeners, sendMessage },
+      runtime: {
+        onMessage: listeners,
+        async sendMessage(message) {
+          tabCalls.runtime.push(structuredClone(message));
+          return sendMessage(message);
+        },
+      },
       windows: { getCurrent: async () => ({ id: 1 }) },
       tabs: {
         onUpdated: listeners,
         onActivated: listeners,
+        async query(options) {
+          tabCalls.query.push(structuredClone(options));
+          if (
+            options?.active === true &&
+            options?.lastFocusedWindow === true &&
+            !Object.hasOwn(options, "url")
+          ) {
+            return currentActiveTabs;
+          }
+          return backgroundYouTubeTabs;
+        },
         sendMessage: async () => ({}),
         create() {},
       },
@@ -295,6 +321,11 @@ function loadSidepanelRaceHarness({ cacheGets, sendMessage }) {
   return {
     helpers: sandbox.__YTD_RACE_TESTING__,
     storageWrites,
+    elements,
+    tabCalls,
+    setActiveTabs(tabs) {
+      currentActiveTabs = tabs;
+    },
   };
 }
 
@@ -308,6 +339,128 @@ function transcriptResult(label) {
     source: "native",
   };
 }
+
+test("side panel tab reconciliation fails closed without an active tab", async () => {
+  const harness = loadSidepanelRaceHarness({
+    cacheGets: async () => ({}),
+    sendMessage: async () => ({ success: true }),
+  });
+
+  await harness.helpers.checkCurrentTab();
+
+  assert.deepEqual(plain(harness.tabCalls.query), [
+    { active: true, lastFocusedWindow: true },
+  ]);
+  assert.equal(harness.elements.get("welcomeState").style.display, "flex");
+  assert.deepEqual(harness.tabCalls.runtime, []);
+  assert.equal(harness.helpers.getRaceState().currentVideoId, null);
+});
+
+test("side panel keeps video and Ask state when a non-YouTube tab is active", async () => {
+  const harness = loadSidepanelRaceHarness({
+    activeTabs: [
+      { id: 21, url: "https://www.youtube.com/watch?v=front" },
+    ],
+    backgroundYouTubeTabs: [
+      { id: 99, url: "https://www.youtube.com/watch?v=background" },
+    ],
+    cacheGets: async () => ({}),
+    sendMessage: async (message) => {
+      if (message.action === "relayToContent") {
+        return {
+          success: true,
+          response: {
+            title: "Front video",
+            channelName: "Front channel",
+            description: "Front description",
+            duration: 120,
+          },
+        };
+      }
+      if (message.action === "fetchTranscript") {
+        return transcriptResult(message.videoId);
+      }
+      if (message.action === "getNotes") return { success: true, notes: [] };
+      if (message.action === "getVocabulary") {
+        return { success: true, vocabulary: [] };
+      }
+      return { success: true };
+    },
+  });
+
+  await harness.helpers.checkCurrentTab();
+  await nextTurn();
+  await nextTurn();
+  let state = harness.helpers.getRaceState();
+  assert.equal(state.currentVideoId, "front");
+  assert.equal(state.currentVideoUrl, "https://www.youtube.com/watch?v=front");
+  assert.equal(state.youtubeTabId, 21);
+  assert.equal(state.currentVideoTitle, "Front video");
+  assert.equal(state.askVideoId, "front");
+  assert.equal(
+    harness.tabCalls.runtime.some(
+      (message) =>
+        message.action === "relayToContent" &&
+        message.payload?.action === "getVideoInfo",
+    ),
+    true,
+  );
+  assert.equal(
+    harness.tabCalls.runtime.some(
+      (message) =>
+        message.action === "fetchTranscript" &&
+        message.videoId === "front" &&
+        message.mode === "native",
+    ),
+    true,
+  );
+
+  harness.tabCalls.query.length = 0;
+  harness.setActiveTabs([{ id: 30, url: "https://example.com/article" }]);
+  await harness.helpers.checkCurrentTab();
+  await nextTurn();
+
+  state = harness.helpers.getRaceState();
+  assert.deepEqual(plain(harness.tabCalls.query), [
+    { active: true, lastFocusedWindow: true },
+  ]);
+  assert.equal(harness.tabCalls.closes, 1);
+  assert.equal(state.currentVideoId, "front");
+  assert.equal(state.askVideoId, "front");
+  assert.equal(
+    harness.tabCalls.runtime.some(
+      (message) =>
+        message.action === "fetchTranscript" &&
+        message.videoId === "background",
+    ),
+    false,
+  );
+});
+
+test("an active YouTube non-watch page shows welcome without starting a digest", async () => {
+  const harness = loadSidepanelRaceHarness({
+    activeTabs: [{ id: 22, url: "https://www.youtube.com/feed/subscriptions" }],
+    cacheGets: async () => ({}),
+    sendMessage: async (message) => {
+      if (message.action === "relayToContent") {
+        return { success: true, response: { title: "Not a video" } };
+      }
+      return { success: true };
+    },
+  });
+
+  await harness.helpers.checkCurrentTab();
+
+  assert.deepEqual(plain(harness.tabCalls.query), [
+    { active: true, lastFocusedWindow: true },
+  ]);
+  assert.equal(harness.elements.get("welcomeState").style.display, "flex");
+  assert.equal(harness.helpers.getRaceState().currentVideoId, null);
+  assert.equal(
+    harness.tabCalls.runtime.some((message) => message.action === "fetchTranscript"),
+    false,
+  );
+});
 
 test("a stale cache lookup cannot take over a newer completed digest", async () => {
   const cacheA = deferred();

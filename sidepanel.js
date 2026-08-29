@@ -602,37 +602,20 @@ function setVocabularyFilter(showAll) {
 
 async function checkCurrentTab() {
   try {
-    // Try multiple strategies to find the YouTube tab
-    let tab = null;
-
-    // Strategy 1: Active tab in last focused window
-    let tabs = await chrome.tabs.query({
+    const [tab] = await chrome.tabs.query({
       active: true,
       lastFocusedWindow: true,
     });
-    if (tabs[0]?.url?.includes("youtube.com")) {
-      tab = tabs[0];
-    }
-
-    // Strategy 2: Any active YouTube tab
-    if (!tab) {
-      tabs = await chrome.tabs.query({
-        url: "https://www.youtube.com/*",
-        active: true,
-      });
-      if (tabs[0]) tab = tabs[0];
-    }
-
-    // Strategy 3: Any YouTube tab (last resort)
-    if (!tab) {
-      tabs = await chrome.tabs.query({ url: "https://www.youtube.com/*" });
-      if (tabs[0]) tab = tabs[0];
-    }
 
     debugLog("[YouTube Digest Panel] Found tab:", tab?.id, tab?.url);
 
     if (!tab?.url) {
       showState("welcome");
+      return;
+    }
+
+    if (!tab.url.startsWith("https://www.youtube.com")) {
+      handleFrontTabUrl(tab.url);
       return;
     }
 
@@ -4403,14 +4386,19 @@ globalThis.__YTD_VOCABULARY_UI_TESTING__ = {
 };
 
 globalThis.__YTD_RACE_TESTING__ = {
+  checkCurrentTab,
   startDigest,
   triggerAnalysis,
   getRaceState: () => ({
     currentVideoId,
+    currentVideoUrl,
+    currentVideoTitle,
     currentTranscriptText,
     currentAnalysis,
     isAnalysisLoading,
     digestGeneration,
     analysisGeneration,
+    youtubeTabId,
+    askVideoId: askState.videoId,
   }),
 };

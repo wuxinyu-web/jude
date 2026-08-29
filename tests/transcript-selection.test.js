@@ -12,6 +12,36 @@ const styles = fs.readFileSync(
   "utf8",
 );
 
+test("the panel reconciles against only the active tab in the last-focused window", () => {
+  const start = source.indexOf("async function checkCurrentTab()");
+  const end = source.indexOf("function extractVideoId", start);
+  assert.ok(start >= 0 && end > start, "checkCurrentTab must be present");
+  const checkCurrentTabSource = source.slice(start, end);
+
+  assert.equal(
+    (checkCurrentTabSource.match(/chrome\.tabs\.query\(/g) || []).length,
+    1,
+    "checkCurrentTab must perform exactly one tab query",
+  );
+  assert.match(
+    checkCurrentTabSource,
+    /chrome\.tabs\.query\(\{\s*active:\s*true,\s*lastFocusedWindow:\s*true,?\s*\}\)/,
+  );
+  assert.match(
+    checkCurrentTabSource,
+    /if \(!tab\?\.url\) \{[\s\S]*?showState\("welcome"\);[\s\S]*?return;[\s\S]*?\}/,
+  );
+  assert.match(
+    checkCurrentTabSource,
+    /if \(!tab\.url\.startsWith\("https:\/\/www\.youtube\.com"\)\) \{\s*handleFrontTabUrl\(tab\.url\);\s*return;\s*\}/,
+  );
+  assert.doesNotMatch(checkCurrentTabSource, /tabs\.query\(\{\s*url:/);
+  assert.doesNotMatch(
+    checkCurrentTabSource,
+    /url:\s*"https:\/\/www\.youtube\.com\/\*"/,
+  );
+});
+
 test("all timestamped transcript row clicks use the selection-aware seek helper", () => {
   assert.match(
     source,
