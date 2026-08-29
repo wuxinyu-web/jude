@@ -10,6 +10,8 @@
 
 **Design:** `docs/superpowers/specs/2026-08-29-upstream-selective-integration-design.md`
 
+**Implementation status (2026-08-29):** Tasks 1-8 are implemented. Automated tests, release checks, package integrity, and independent reviews pass; manual Chrome runtime verification remains. Every `Expected: FAIL` line below records its historical TDD RED step, not the current repository state.
+
 ---
 
 ### Task 1: Restrict the background panel lifecycle to the active tab

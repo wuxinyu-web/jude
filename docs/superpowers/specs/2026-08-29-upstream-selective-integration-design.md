@@ -1,7 +1,7 @@
 # Upstream Selective Integration Design
 
 Date: 2026-08-29
-Status: Approved design; implementation pending
+Status: Implemented for v1.3.0; automated and independent integration review complete, manual Chrome runtime verification pending
 
 ## Goal
 
