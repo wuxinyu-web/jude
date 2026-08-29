@@ -133,6 +133,31 @@ test("background relay source contains no URL-filtered or arbitrary YouTube fall
   );
 });
 
+test("Transcript position lifecycle preserves Ask's single-scroll layout contract", () => {
+  const panelSource = read("sidepanel.js");
+  const panelStyles = read("sidepanel.css");
+  const switchStart = panelSource.indexOf("function switchTab(tabName)");
+  const switchEnd = panelSource.indexOf("// ASK", switchStart);
+  const switchSource = panelSource.slice(switchStart, switchEnd);
+
+  assert.match(
+    switchSource,
+    /contentArea\?\.classList\.toggle\("ask-mode", tabName === "ask"\)/,
+  );
+  assert.match(panelStyles, /\.content\.ask-mode\s*\{\s*overflow-y:\s*hidden;/);
+  assert.match(
+    panelStyles,
+    /\.content\.ask-mode #resultsState\s*\{[^}]*height:\s*100%;[^}]*min-height:\s*0;/,
+  );
+  const scrollHandlerStart = panelSource.indexOf("function onContentAreaScroll()");
+  const scrollHandlerEnd = panelSource.indexOf("// OVERVIEW MODE UI", scrollHandlerStart);
+  assert.match(
+    panelSource.slice(scrollHandlerStart, scrollHandlerEnd),
+    /if \(!transcriptTabIsActive\(\)\) return;/,
+    "Ask, Overview, and Library scrolling must not save Transcript position",
+  );
+});
+
 function deferred() {
   let resolve;
   const promise = new Promise((done) => {

@@ -195,6 +195,7 @@ let lastAutoScrollTime = 0; // Timestamp of last programmatic scroll (ignores sc
 // Session storage survives a side-panel close but clears when Chrome closes.
 const TRANSCRIPT_VIEW_STATE_KEY = "ytd_transcript_view_state";
 const TRANSCRIPT_VIEW_STATE_LIMIT = 20;
+const TRANSCRIPT_VIEW_STATE_SAVE_DEBOUNCE_MS = 250;
 let pendingTranscriptViewState = null;
 let transcriptViewStateSaveTimer = null;
 let isRestoringTranscriptView = false;
@@ -314,6 +315,162 @@ async function saveTranscriptViewState(videoId, scrollTop) {
     // Session storage can disappear while Chrome tears down the panel. The
     // visible Transcript remains usable; only position persistence is skipped.
   }
+}
+
+function transcriptTabIsActive() {
+  return Boolean(
+    document.querySelector('.tab.active[data-tab="transcript"]'),
+  );
+}
+
+function isCurrentTranscriptViewSnapshot(snapshot) {
+  return Boolean(
+    snapshot &&
+      snapshot.videoId === currentVideoId &&
+      snapshot.videoId === activeDigestVideoId &&
+      snapshot.generation === digestGeneration,
+  );
+}
+
+function clearTranscriptViewStateSaveTimer() {
+  if (transcriptViewStateSaveTimer !== null) {
+    clearTimeout(transcriptViewStateSaveTimer);
+    transcriptViewStateSaveTimer = null;
+  }
+}
+
+function scheduleTranscriptViewStateSave(snapshot, scrollTop) {
+  clearTranscriptViewStateSaveTimer();
+  transcriptViewStateSaveTimer = setTimeout(() => {
+    transcriptViewStateSaveTimer = null;
+    if (
+      isRestoringTranscriptView ||
+      !transcriptTabIsActive() ||
+      !isCurrentTranscriptViewSnapshot(snapshot)
+    ) {
+      return;
+    }
+    void saveTranscriptViewState(snapshot.videoId, scrollTop);
+  }, TRANSCRIPT_VIEW_STATE_SAVE_DEBOUNCE_MS);
+}
+
+function captureTranscriptViewPosition({ immediate = false } = {}) {
+  if (isRestoringTranscriptView || !transcriptTabIsActive()) return false;
+  if (!isValidTranscriptViewStateVideoId(currentVideoId)) return false;
+  if (currentVideoId !== activeDigestVideoId) return false;
+
+  const contentArea = document.getElementById("contentArea");
+  const scrollTop = contentArea?.scrollTop;
+  if (typeof scrollTop !== "number" || !Number.isFinite(scrollTop)) return false;
+  if (scrollTop < 0) return false;
+
+  const snapshot = {
+    videoId: currentVideoId,
+    generation: digestGeneration,
+  };
+  lastTranscriptScrollTop = scrollTop;
+  pendingTranscriptViewState = {
+    ...snapshot,
+    scrollTop,
+    hasSavedPosition: true,
+  };
+
+  if (immediate) {
+    clearTranscriptViewStateSaveTimer();
+    void saveTranscriptViewState(snapshot.videoId, scrollTop);
+  } else {
+    scheduleTranscriptViewStateSave(snapshot, scrollTop);
+  }
+  return true;
+}
+
+function captureTranscriptPositionBeforeVideoChange(nextVideoId) {
+  if (nextVideoId === currentVideoId) return false;
+  clearTranscriptViewStateSaveTimer();
+
+  if (isValidTranscriptViewStateVideoId(currentVideoId)) {
+    if (transcriptTabIsActive() && !isRestoringTranscriptView) {
+      const contentArea = document.getElementById("contentArea");
+      const scrollTop = contentArea?.scrollTop;
+      if (
+        typeof scrollTop === "number" &&
+        Number.isFinite(scrollTop) &&
+        scrollTop >= 0
+      ) {
+        lastTranscriptScrollTop = scrollTop;
+      }
+    }
+    void saveTranscriptViewState(currentVideoId, lastTranscriptScrollTop);
+  }
+
+  pendingTranscriptViewState = null;
+  lastTranscriptScrollTop = 0;
+  return true;
+}
+
+async function loadPendingTranscriptViewState(snapshot) {
+  const savedState = await loadTranscriptViewState(snapshot?.videoId);
+  if (!isCurrentTranscriptViewSnapshot(snapshot)) return false;
+
+  pendingTranscriptViewState = {
+    videoId: snapshot.videoId,
+    generation: snapshot.generation,
+    scrollTop: savedState?.scrollTop ?? 0,
+    hasSavedPosition: Boolean(savedState),
+  };
+  lastTranscriptScrollTop = 0;
+  return true;
+}
+
+function restorePendingTranscriptViewState(snapshot) {
+  if (!transcriptTabIsActive()) return false;
+  if (!isCurrentTranscriptViewSnapshot(snapshot)) return false;
+  if (
+    !pendingTranscriptViewState ||
+    pendingTranscriptViewState.videoId !== snapshot.videoId ||
+    pendingTranscriptViewState.generation !== snapshot.generation
+  ) {
+    return false;
+  }
+
+  const contentArea = document.getElementById("contentArea");
+  if (!contentArea) return false;
+  const savedScrollTop = pendingTranscriptViewState.scrollTop;
+  const scrollTop =
+    typeof savedScrollTop === "number" &&
+    Number.isFinite(savedScrollTop) &&
+    savedScrollTop >= 0
+      ? savedScrollTop
+      : 0;
+  const hasSavedPosition =
+    pendingTranscriptViewState.hasSavedPosition === true && scrollTop > 0;
+
+  clearTranscriptViewStateSaveTimer();
+  isRestoringTranscriptView = true;
+  lastAutoScrollTime = Date.now();
+  lastTranscriptScrollTop = scrollTop;
+  contentArea.scrollTop = scrollTop;
+  pendingTranscriptViewState = null;
+
+  if (hasSavedPosition) {
+    autoScrollEnabled = false;
+    const followPlaybackButton = document.getElementById("followPlaybackBtn");
+    if (followPlaybackButton) followPlaybackButton.style.display = "block";
+  }
+
+  setTimeout(() => {
+    isRestoringTranscriptView = false;
+  }, 0);
+  return true;
+}
+
+function setupTranscriptViewStateListeners() {
+  const contentArea = document.getElementById("contentArea");
+  contentArea?.removeEventListener("scroll", onContentAreaScroll);
+  contentArea?.addEventListener("scroll", onContentAreaScroll);
+  window.addEventListener("pagehide", () => {
+    captureTranscriptViewPosition({ immediate: true });
+  });
 }
 
 // ============================================================
@@ -586,6 +743,8 @@ chrome.tabs.onActivated.addListener(async ({ tabId, windowId }) => {
 });
 
 function setupEventListeners() {
+  setupTranscriptViewStateListeners();
+
   // Tab switching
   document.querySelectorAll(".tab").forEach((tab) => {
     tab.addEventListener("click", () => switchTab(tab.dataset.tab));
@@ -824,6 +983,8 @@ async function startDigest(videoId, videoUrl) {
     return;
   }
 
+  captureTranscriptPositionBeforeVideoChange(videoId);
+
   const requestSnapshot = {
     generation: ++digestGeneration,
     videoId,
@@ -849,6 +1010,9 @@ async function startDigest(videoId, videoUrl) {
   currentTranscriptTimestamped = null;
   currentTranscriptLanguage = null;
   currentTranscriptSource = "native";
+
+  await loadPendingTranscriptViewState(requestSnapshot);
+  if (!isCurrentDigestRequest(requestSnapshot)) return;
 
   // Check cache for this video
   const cached = await loadFromCache(videoId, requestSnapshot);
@@ -892,6 +1056,7 @@ async function startDigest(videoId, videoUrl) {
 
     showState("results");
     document.getElementById("tabsNav").style.display = "flex";
+    restorePendingTranscriptViewState(requestSnapshot);
 
     // Load notes for this video
     loadNotes(videoId, requestSnapshot);
@@ -973,6 +1138,7 @@ async function completeTranscriptLoad(videoId, transcriptResult, requestSnapshot
   renderTranscript();
   showState("results");
   document.getElementById("tabsNav").style.display = "flex";
+  restorePendingTranscriptViewState(requestSnapshot);
 
   // Load notes for this video
   loadNotes(videoId, requestSnapshot);
@@ -1499,6 +1665,9 @@ function showConfigError(configStatus) {
 
 function switchTab(tabName) {
   const contentArea = document.getElementById("contentArea");
+  if (transcriptTabIsActive() && tabName !== "transcript") {
+    captureTranscriptViewPosition({ immediate: true });
+  }
   contentArea?.classList.toggle("ask-mode", tabName === "ask");
   if (tabName === "ask") {
     contentArea.scrollTop = 0;
@@ -1515,6 +1684,10 @@ function switchTab(tabName) {
   // Start/stop playback tracking based on which tab is active
   if (tabName === "transcript") {
     startPlaybackTracking();
+    restorePendingTranscriptViewState({
+      videoId: currentVideoId,
+      generation: digestGeneration,
+    });
   } else {
     stopPlaybackTracking();
   }
@@ -3959,6 +4132,9 @@ function highlightActiveEntry(currentSeconds) {
  * can read at their own pace without being yanked back.
  */
 function onContentAreaScroll() {
+  if (!transcriptTabIsActive()) return;
+  if (isRestoringTranscriptView) return;
+
   // Ignore scroll events within 1 second of a programmatic scroll
   // (smooth scroll animations can last longer than a simple boolean flag)
   if (Date.now() - lastAutoScrollTime < 1000) return;
@@ -3968,6 +4144,8 @@ function onContentAreaScroll() {
     autoScrollEnabled = false;
     document.getElementById("followPlaybackBtn").style.display = "block";
   }
+
+  captureTranscriptViewPosition();
 }
 
 // ============================================================
@@ -4476,6 +4654,34 @@ function setTranslatingSpinner(show) {
 globalThis.__YTD_TRANSCRIPT_TESTING__ = {
   loadTranscriptViewState,
   saveTranscriptViewState,
+  transcriptTabIsActive,
+  setupTranscriptViewStateListeners,
+  captureTranscriptViewPosition,
+  loadPendingTranscriptViewState,
+  restorePendingTranscriptViewState,
+  onContentAreaScroll,
+  setTranscriptReadingPositionTestState(state = {}) {
+    if (Object.hasOwn(state, "videoId")) currentVideoId = state.videoId;
+    if (Object.hasOwn(state, "activeVideoId")) {
+      activeDigestVideoId = state.activeVideoId;
+    }
+    if (Object.hasOwn(state, "generation")) {
+      digestGeneration = state.generation;
+    }
+    if (Object.hasOwn(state, "pending")) {
+      pendingTranscriptViewState = state.pending;
+    }
+    if (Object.hasOwn(state, "autoScrollEnabled")) {
+      autoScrollEnabled = state.autoScrollEnabled;
+    }
+  },
+  getTranscriptReadingPositionTestState: () => ({
+    pending: pendingTranscriptViewState,
+    lastTranscriptScrollTop,
+    isRestoringTranscriptView,
+    autoScrollEnabled,
+    lastAutoScrollTime,
+  }),
   sendTranslationMessage,
   createExplanationTranslationState,
   ensureExplanationTranslation,

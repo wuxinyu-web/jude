@@ -90,6 +90,113 @@ function createSessionStorage(initialValue = {}) {
   };
 }
 
+function loadTranscriptReadingPositionLifecycleHarness({
+  initialSessionValue = {},
+  now = 10_000,
+} = {}) {
+  const storage = createSessionStorage(initialSessionValue);
+  const timers = [];
+  const windowListeners = new Map();
+  let activeTabName = "transcript";
+  let currentNow = now;
+  const contentArea = {
+    scrollTop: 0,
+    style: {},
+    classList: { add() {}, remove() {}, toggle() {}, contains() { return false; } },
+    addEventListener() {},
+    removeEventListener() {},
+  };
+  const followPlaybackButton = { style: { display: "none" } };
+  const listeners = { addListener() {} };
+  const sandbox = {
+    console,
+    URL,
+    TextDecoder,
+    TextEncoder,
+    Date: class extends Date {
+      static now() {
+        currentNow += 1;
+        return currentNow;
+      }
+    },
+    setTimeout(callback, delay) {
+      timers.push({ callback, delay, active: true });
+      return timers.length;
+    },
+    clearTimeout(id) {
+      if (timers[id - 1]) timers[id - 1].active = false;
+    },
+    setInterval: () => 1,
+    clearInterval() {},
+    IntersectionObserver: class {},
+    CSS: { escape: (value) => value },
+    NodeFilter: { SHOW_TEXT: 4, FILTER_ACCEPT: 1, FILTER_REJECT: 2 },
+    window: {
+      getSelection: () => null,
+      close() {},
+      addEventListener(type, listener) {
+        windowListeners.set(type, listener);
+      },
+    },
+    document: {
+      addEventListener() {},
+      querySelector(selector) {
+        if (selector === '.tab.active[data-tab="transcript"]') {
+          return activeTabName === "transcript" ? { dataset: { tab: "transcript" } } : null;
+        }
+        return null;
+      },
+      querySelectorAll: () => [],
+      getElementById(id) {
+        if (id === "contentArea") return contentArea;
+        if (id === "followPlaybackBtn") return followPlaybackButton;
+        return null;
+      },
+      createElement: () => ({
+        addEventListener() {},
+        appendChild() {},
+        classList: { add() {}, remove() {}, toggle() {} },
+        style: {},
+      }),
+    },
+    chrome: {
+      runtime: {
+        onMessage: listeners,
+        sendMessage: async () => ({ success: true }),
+      },
+      windows: { getCurrent: async () => ({ id: 1 }) },
+      tabs: { onUpdated: listeners, onActivated: listeners },
+      storage: { session: storage },
+    },
+    YTD_SETTINGS: {},
+  };
+  sandbox.globalThis = sandbox;
+  vm.runInNewContext(source, sandbox);
+
+  return {
+    helpers: sandbox.__YTD_TRANSCRIPT_TESTING__,
+    storage,
+    contentArea,
+    followPlaybackButton,
+    setActiveTab(name) {
+      activeTabName = name;
+    },
+    fireTimer(delay) {
+      const timer = timers.find((candidate) => candidate.active && candidate.delay === delay);
+      assert.ok(timer, `expected an active ${delay}ms timer`);
+      timer.active = false;
+      timer.callback();
+    },
+    activeTimers(delay) {
+      return timers.filter((timer) => timer.active && timer.delay === delay).length;
+    },
+    dispatchWindow(type) {
+      assert.equal(typeof windowListeners.get(type), "function");
+      return windowListeners.get(type)();
+    },
+  };
+}
+
 test("Transcript reading positions round-trip per exact video in session storage", async () => {
   const storage = createSessionStorage();
   const helpers = loadTranscriptViewStateHelpers({ sessionStorage: storage });
@@ -277,6 +384,145 @@ test("Transcript reading positions fail safely when session storage is unavailab
     plain(await recoveringHelpers.loadTranscriptViewState("video-recovered")),
     { videoId: "video-recovered", scrollTop: 20 },
   );
+});
+
+test("manual Transcript scrolling is debounced and other tabs never overwrite it", async () => {
+  const harness = loadTranscriptReadingPositionLifecycleHarness();
+  const { helpers, contentArea, storage } = harness;
+  assert.equal(typeof helpers.setTranscriptReadingPositionTestState, "function");
+  helpers.setTranscriptReadingPositionTestState({
+    videoId: "video-A",
+    generation: 7,
+    activeVideoId: "video-A",
+  });
+
+  contentArea.scrollTop = 245;
+  helpers.onContentAreaScroll();
+  assert.equal(harness.activeTimers(250), 1);
+  harness.fireTimer(250);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(storage.data.ytd_transcript_view_state["video-A"].scrollTop, 245);
+
+  harness.setActiveTab("overview");
+  contentArea.scrollTop = 900;
+  helpers.onContentAreaScroll();
+  assert.equal(harness.activeTimers(250), 0);
+  assert.equal(storage.data.ytd_transcript_view_state["video-A"].scrollTop, 245);
+});
+
+test("Transcript position capture flushes on pagehide and tab exit", async () => {
+  const harness = loadTranscriptReadingPositionLifecycleHarness();
+  const { helpers, contentArea, storage } = harness;
+  helpers.setTranscriptReadingPositionTestState({
+    videoId: "video-A",
+    generation: 3,
+    activeVideoId: "video-A",
+  });
+  helpers.setupTranscriptViewStateListeners();
+
+  contentArea.scrollTop = 111;
+  helpers.captureTranscriptViewPosition({ immediate: true });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(storage.data.ytd_transcript_view_state["video-A"].scrollTop, 111);
+
+  contentArea.scrollTop = 222;
+  harness.dispatchWindow("pagehide");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(storage.data.ytd_transcript_view_state["video-A"].scrollTop, 222);
+});
+
+test("saved Transcript position loads and restores only for its video generation", async () => {
+  const harness = loadTranscriptReadingPositionLifecycleHarness({
+    initialSessionValue: {
+      ytd_transcript_view_state: {
+        "video-A": { scrollTop: 321, updatedAt: 1 },
+      },
+    },
+  });
+  const { helpers, contentArea, followPlaybackButton, storage } = harness;
+  helpers.setTranscriptReadingPositionTestState({
+    videoId: "video-A",
+    generation: 9,
+    activeVideoId: "video-A",
+    autoScrollEnabled: true,
+  });
+  const snapshot = { videoId: "video-A", generation: 9 };
+
+  assert.equal(await helpers.loadPendingTranscriptViewState(snapshot), true);
+  assert.equal(helpers.restorePendingTranscriptViewState(snapshot), true);
+  assert.equal(contentArea.scrollTop, 321);
+  assert.equal(followPlaybackButton.style.display, "block");
+  const restored = plain(helpers.getTranscriptReadingPositionTestState());
+  assert.equal(restored.autoScrollEnabled, false);
+  assert.equal(restored.lastTranscriptScrollTop, 321);
+  assert.equal(restored.lastAutoScrollTime > 0, true);
+
+  helpers.onContentAreaScroll();
+  assert.equal(harness.activeTimers(250), 0, "restore scroll must not self-save");
+  assert.equal(storage.writes.length, 0);
+
+  helpers.setTranscriptReadingPositionTestState({
+    pending: { videoId: "video-A", generation: 9, scrollTop: 555, hasSavedPosition: true },
+    videoId: "video-B",
+    generation: 10,
+    activeVideoId: "video-B",
+  });
+  contentArea.scrollTop = 17;
+  assert.equal(
+    helpers.restorePendingTranscriptViewState({ videoId: "video-A", generation: 9 }),
+    false,
+  );
+  assert.equal(contentArea.scrollTop, 17, "stale video state must be ignored");
+});
+
+test("missing or invalid Transcript state falls back safely to the top", () => {
+  const harness = loadTranscriptReadingPositionLifecycleHarness();
+  const { helpers, contentArea } = harness;
+  helpers.setTranscriptReadingPositionTestState({
+    pending: { videoId: "video-A", generation: 4, scrollTop: "bad", hasSavedPosition: false },
+    videoId: "video-A",
+    generation: 4,
+    activeVideoId: "video-A",
+  });
+  contentArea.scrollTop = 88;
+
+  assert.equal(
+    helpers.restorePendingTranscriptViewState({ videoId: "video-A", generation: 4 }),
+    true,
+  );
+  assert.equal(contentArea.scrollTop, 0);
+  assert.equal(helpers.getTranscriptReadingPositionTestState().pending, null);
+});
+
+test("Transcript lifecycle is wired around tab, video, cached, and fresh render boundaries", () => {
+  const switchStart = source.indexOf("function switchTab(tabName)");
+  const switchEnd = source.indexOf("// ASK", switchStart);
+  const switchSource = source.slice(switchStart, switchEnd);
+  assert.match(
+    switchSource,
+    /if \(transcriptTabIsActive\(\) && tabName !== "transcript"\)[\s\S]*?captureTranscriptViewPosition\(\{ immediate: true \}\)/,
+  );
+  assert.match(switchSource, /if \(tabName === "transcript"\)[\s\S]*?restorePendingTranscriptViewState/);
+
+  const digestStart = source.indexOf("async function startDigest");
+  const digestEnd = source.indexOf("function isCurrentDigestRequest", digestStart);
+  const digestSource = source.slice(digestStart, digestEnd);
+  assert.match(digestSource, /captureTranscriptPositionBeforeVideoChange/);
+  assert.match(digestSource, /loadPendingTranscriptViewState\(requestSnapshot\)/);
+  assert.equal(
+    (digestSource.match(/restorePendingTranscriptViewState\(requestSnapshot\)/g) || []).length,
+    1,
+    "cached rendering must restore once",
+  );
+
+  const completeStart = source.indexOf("async function completeTranscriptLoad");
+  const completeEnd = source.indexOf("// RENDERING", completeStart);
+  assert.match(
+    source.slice(completeStart, completeEnd),
+    /renderTranscript\(\);[\s\S]*?restorePendingTranscriptViewState\(requestSnapshot\)/,
+    "fresh rendering must restore after Transcript DOM exists",
+  );
+  assert.match(source, /window\.addEventListener\("pagehide"/);
 });
 
 test("the panel reconciles against only the active tab in the last-focused window", () => {
