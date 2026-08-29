@@ -2,6 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
+const vm = require("node:vm");
 
 const source = fs.readFileSync(
   path.resolve(__dirname, "..", "sidepanel.js"),
@@ -11,6 +12,218 @@ const styles = fs.readFileSync(
   path.resolve(__dirname, "..", "sidepanel.css"),
   "utf8",
 );
+
+function plain(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function loadTranscriptViewStateHelpers({
+  sessionStorage,
+  now = 1_000,
+  omitStorage = false,
+} = {}) {
+  const listeners = { addListener() {} };
+  const NativeDate = Date;
+  let currentNow = now;
+  class TestDate extends NativeDate {
+    static now() {
+      const value = currentNow;
+      currentNow += 1;
+      return value;
+    }
+  }
+  const sandbox = {
+    console,
+    URL,
+    TextDecoder,
+    TextEncoder,
+    Date: TestDate,
+    setTimeout: () => 0,
+    clearTimeout() {},
+    setInterval() {},
+    clearInterval() {},
+    IntersectionObserver: class {},
+    CSS: { escape: (value) => value },
+    NodeFilter: { SHOW_TEXT: 4, FILTER_ACCEPT: 1, FILTER_REJECT: 2 },
+    window: { getSelection: () => null, close() {} },
+    document: {
+      addEventListener() {},
+      querySelectorAll: () => [],
+      querySelector: () => null,
+      getElementById: () => null,
+      createElement: () => ({
+        addEventListener() {},
+        appendChild() {},
+        classList: { add() {}, remove() {}, toggle() {} },
+        style: {},
+      }),
+    },
+    chrome: {
+      runtime: {
+        onMessage: listeners,
+        sendMessage: async () => ({ success: true }),
+      },
+      windows: { getCurrent: async () => ({ id: 1 }) },
+      tabs: { onUpdated: listeners, onActivated: listeners },
+      storage: omitStorage ? {} : { session: sessionStorage },
+    },
+    YTD_SETTINGS: {},
+  };
+  sandbox.globalThis = sandbox;
+  vm.runInNewContext(source, sandbox);
+  return sandbox.__YTD_TRANSCRIPT_TESTING__;
+}
+
+function createSessionStorage(initialValue = {}) {
+  const data = structuredClone(initialValue);
+  const writes = [];
+  return {
+    data,
+    writes,
+    async get(key) {
+      return Object.hasOwn(data, key) ? { [key]: structuredClone(data[key]) } : {};
+    },
+    async set(value) {
+      writes.push(structuredClone(value));
+      Object.assign(data, structuredClone(value));
+    },
+  };
+}
+
+test("Transcript reading positions round-trip per exact video in session storage", async () => {
+  const storage = createSessionStorage();
+  const helpers = loadTranscriptViewStateHelpers({ sessionStorage: storage });
+
+  await helpers.saveTranscriptViewState("video-A", 321.5);
+  await helpers.saveTranscriptViewState("video-B", 99);
+
+  assert.deepEqual(
+    plain(await helpers.loadTranscriptViewState("video-A")),
+    { videoId: "video-A", scrollTop: 321.5 },
+  );
+  assert.deepEqual(
+    plain(await helpers.loadTranscriptViewState("video-B")),
+    { videoId: "video-B", scrollTop: 99 },
+  );
+  assert.equal(await helpers.loadTranscriptViewState("video-a"), null);
+  const savedA = storage.data.ytd_transcript_view_state["video-A"];
+  assert.deepEqual(Object.keys(savedA).sort(), ["scrollTop", "updatedAt"]);
+  assert.equal(savedA.scrollTop, 321.5);
+  assert.equal(Number.isFinite(savedA.updatedAt), true);
+});
+
+test("Transcript reading-position helpers reject invalid input and stored values", async () => {
+  const storage = createSessionStorage({
+    ytd_transcript_view_state: {
+      negative: { scrollTop: -1, updatedAt: 1 },
+      nan: { scrollTop: Number.NaN, updatedAt: 2 },
+      string: { scrollTop: "12", updatedAt: 3 },
+      missing: { updatedAt: 4 },
+    },
+  });
+  const helpers = loadTranscriptViewStateHelpers({ sessionStorage: storage });
+
+  for (const videoId of ["negative", "nan", "string", "missing", "absent"]) {
+    assert.equal(await helpers.loadTranscriptViewState(videoId), null);
+  }
+  assert.equal(await helpers.loadTranscriptViewState(""), null);
+
+  await helpers.saveTranscriptViewState("", 10);
+  await helpers.saveTranscriptViewState("negative", -1);
+  await helpers.saveTranscriptViewState("nan", Number.NaN);
+  await helpers.saveTranscriptViewState("string", "12");
+  assert.equal(storage.writes.length, 0);
+});
+
+test("Transcript reading-position storage keeps the 20 newest sanitized entries", async () => {
+  const storage = createSessionStorage({
+    ytd_transcript_view_state: {
+      stale: { scrollTop: 1, updatedAt: 1, extra: "remove me" },
+      broken: { scrollTop: -10, updatedAt: 500 },
+    },
+  });
+  const helpers = loadTranscriptViewStateHelpers({
+    sessionStorage: storage,
+    now: 10_000,
+  });
+
+  for (let index = 0; index < 21; index += 1) {
+    await helpers.saveTranscriptViewState(`video-${index}`, index);
+  }
+
+  const saved = storage.data.ytd_transcript_view_state;
+  assert.equal(Object.keys(saved).length, 20);
+  assert.deepEqual(Object.keys(saved), [
+    "video-20",
+    "video-19",
+    "video-18",
+    "video-17",
+    "video-16",
+    "video-15",
+    "video-14",
+    "video-13",
+    "video-12",
+    "video-11",
+    "video-10",
+    "video-9",
+    "video-8",
+    "video-7",
+    "video-6",
+    "video-5",
+    "video-4",
+    "video-3",
+    "video-2",
+    "video-1",
+  ]);
+  assert.equal(Object.hasOwn(saved, "video-0"), false);
+  assert.equal(Object.hasOwn(saved, "stale"), false);
+  assert.equal(Object.hasOwn(saved, "broken"), false);
+  for (const state of Object.values(saved)) {
+    assert.deepEqual(Object.keys(state).sort(), ["scrollTop", "updatedAt"]);
+  }
+});
+
+test("Transcript reading positions fail safely when session storage is unavailable", async () => {
+  const missingHelpers = loadTranscriptViewStateHelpers({ omitStorage: true });
+  assert.equal(await missingHelpers.loadTranscriptViewState("video-A"), null);
+  await assert.doesNotReject(
+    missingHelpers.saveTranscriptViewState("video-A", 10),
+  );
+
+  const getFailure = new Error("session get failed");
+  const throwingStorage = {
+    get() {
+      throw getFailure;
+    },
+    set() {
+      throw new Error("session set failed");
+    },
+  };
+  const throwingHelpers = loadTranscriptViewStateHelpers({
+    sessionStorage: throwingStorage,
+  });
+  assert.equal(await throwingHelpers.loadTranscriptViewState("video-A"), null);
+  await assert.doesNotReject(
+    throwingHelpers.saveTranscriptViewState("video-A", 10),
+  );
+
+  let setAttempts = 0;
+  const setFailureHelpers = loadTranscriptViewStateHelpers({
+    sessionStorage: {
+      async get() {
+        return {};
+      },
+      set() {
+        setAttempts += 1;
+        throw new Error("session set failed");
+      },
+    },
+  });
+  await assert.doesNotReject(
+    setFailureHelpers.saveTranscriptViewState("video-A", 10),
+  );
+  assert.equal(setAttempts, 1);
+});
 
 test("the panel reconciles against only the active tab in the last-focused window", () => {
   const start = source.indexOf("async function checkCurrentTab()");

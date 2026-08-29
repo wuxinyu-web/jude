@@ -191,6 +191,123 @@ let autoScrollEnabled = true; // True = scroll transcript to follow video playba
 let autoScrollInterval = null; // setInterval ID for polling video time
 let lastAutoScrollTime = 0; // Timestamp of last programmatic scroll (ignores scroll events within 1s)
 
+// --- Transcript reading-position state ---
+// Session storage survives a side-panel close but clears when Chrome closes.
+const TRANSCRIPT_VIEW_STATE_KEY = "ytd_transcript_view_state";
+const TRANSCRIPT_VIEW_STATE_LIMIT = 20;
+let pendingTranscriptViewState = null;
+let transcriptViewStateSaveTimer = null;
+let isRestoringTranscriptView = false;
+let lastTranscriptScrollTop = 0;
+
+/**
+ * Reading position is intentionally session-only. Returning null instead of
+ * falling back to local storage keeps the data-lifetime promise explicit.
+ */
+function getTranscriptViewStateStorage() {
+  try {
+    const storage = globalThis.chrome?.storage?.session;
+    if (
+      !storage ||
+      typeof storage.get !== "function" ||
+      typeof storage.set !== "function"
+    ) {
+      return null;
+    }
+    return storage;
+  } catch (error) {
+    return null;
+  }
+}
+
+function isValidTranscriptViewStateVideoId(videoId) {
+  return typeof videoId === "string" && videoId.trim().length > 0;
+}
+
+function normalizeTranscriptViewStateEntry(state) {
+  if (!state || typeof state !== "object" || Array.isArray(state)) return null;
+  const { scrollTop, updatedAt } = state;
+  if (typeof scrollTop !== "number" || !Number.isFinite(scrollTop)) return null;
+  if (scrollTop < 0) return null;
+  if (typeof updatedAt !== "number" || !Number.isFinite(updatedAt)) return null;
+  if (updatedAt < 0) return null;
+  return { scrollTop, updatedAt };
+}
+
+/**
+ * Reads one video's last visible Transcript position without leaking another
+ * video's state or allowing malformed session data into the UI lifecycle.
+ */
+async function loadTranscriptViewState(videoId) {
+  if (!isValidTranscriptViewStateVideoId(videoId)) return null;
+  const storage = getTranscriptViewStateStorage();
+  if (!storage) return null;
+
+  try {
+    const result = await storage.get(TRANSCRIPT_VIEW_STATE_KEY);
+    const states = result?.[TRANSCRIPT_VIEW_STATE_KEY];
+    if (
+      !states ||
+      typeof states !== "object" ||
+      Array.isArray(states) ||
+      !Object.hasOwn(states, videoId)
+    ) {
+      return null;
+    }
+    const state = normalizeTranscriptViewStateEntry(states[videoId]);
+    return state ? { videoId, scrollTop: state.scrollTop } : null;
+  } catch (error) {
+    return null;
+  }
+}
+
+/**
+ * Stores a newest-first, sanitized map for at most 20 videos. Rebuilding the
+ * map also removes stale fields and malformed entries from prior writes.
+ */
+async function saveTranscriptViewState(videoId, scrollTop) {
+  if (!isValidTranscriptViewStateVideoId(videoId)) return;
+  if (typeof scrollTop !== "number" || !Number.isFinite(scrollTop)) return;
+  if (scrollTop < 0) return;
+
+  const storage = getTranscriptViewStateStorage();
+  if (!storage) return;
+
+  try {
+    const result = await storage.get(TRANSCRIPT_VIEW_STATE_KEY);
+    const storedStates = result?.[TRANSCRIPT_VIEW_STATE_KEY];
+    const previousEntries =
+      storedStates &&
+      typeof storedStates === "object" &&
+      !Array.isArray(storedStates)
+        ? Object.entries(storedStates)
+        : [];
+    const now = Date.now();
+    const entries = [
+      [videoId, { scrollTop, updatedAt: now }],
+      ...previousEntries
+        .filter(([storedVideoId]) => storedVideoId !== videoId)
+        .map(([storedVideoId, state]) => [
+          storedVideoId,
+          normalizeTranscriptViewStateEntry(state),
+        ])
+        .filter(
+          ([storedVideoId, state]) =>
+            isValidTranscriptViewStateVideoId(storedVideoId) && state,
+        ),
+    ];
+    const recentStates = Object.fromEntries(
+      entries
+        .sort(([, left], [, right]) => right.updatedAt - left.updatedAt)
+        .slice(0, TRANSCRIPT_VIEW_STATE_LIMIT),
+    );
+    await storage.set({ [TRANSCRIPT_VIEW_STATE_KEY]: recentStates });
+  } catch (error) {
+    // Session storage can disappear while Chrome tears down the panel. The
+    // visible Transcript remains usable; only position persistence is skipped.
+  }
+}
+
 // ============================================================
 // TRANSCRIPT GROUPING
 // ============================================================
@@ -4349,6 +4466,8 @@ function setTranslatingSpinner(show) {
 // Pure helpers are exposed for the repository's Node tests. The extension does
 // not read this object at runtime.
 globalThis.__YTD_TRANSCRIPT_TESTING__ = {
+  loadTranscriptViewState,
+  saveTranscriptViewState,
   sendTranslationMessage,
   createExplanationTranslationState,
   ensureExplanationTranslation,
