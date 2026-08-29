@@ -106,6 +106,23 @@ test("literal Transcript search finds Chinese text", () => {
   );
 });
 
+test("literal Transcript search maps composed accents to complete source clusters", () => {
+  const { findLiteralTranscriptMatches } = loadSearchHelpers();
+
+  assert.deepEqual(
+    plain(findLiteralTranscriptMatches("Cafe\u0301 noir", "caf\u00e9")),
+    [{ start: 0, end: 5 }],
+  );
+  assert.deepEqual(
+    plain(findLiteralTranscriptMatches("Caf\u00e9 noir", "cafe\u0301")),
+    [{ start: 0, end: 4 }],
+  );
+  assert.deepEqual(
+    plain(findLiteralTranscriptMatches("\ud83d\ude00\uff23afe\u0301", "caf\u00e9")),
+    [{ start: 2, end: 7 }],
+  );
+});
+
 test("literal Transcript search ignores blank input and trims meaningful queries", () => {
   const { findLiteralTranscriptMatches } = loadSearchHelpers();
 

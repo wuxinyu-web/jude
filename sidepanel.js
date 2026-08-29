@@ -3564,9 +3564,16 @@ function buildNormalizedVocabularyText(value, maxLength) {
 
   for (let sourceIndex = 0; sourceIndex < source.length;) {
     const codePoint = source.codePointAt(sourceIndex);
-    const sourceCharacter = String.fromCodePoint(codePoint);
-    const sourceEnd = sourceIndex + sourceCharacter.length;
-    const normalizedPiece = sourceCharacter.normalize("NFKC").toLocaleLowerCase();
+    let sourceCluster = String.fromCodePoint(codePoint);
+    let sourceEnd = sourceIndex + sourceCluster.length;
+    while (sourceEnd < source.length) {
+      const nextCodePoint = source.codePointAt(sourceEnd);
+      const nextCharacter = String.fromCodePoint(nextCodePoint);
+      if (!/^\p{M}$/u.test(nextCharacter)) break;
+      sourceCluster += nextCharacter;
+      sourceEnd += nextCharacter.length;
+    }
+    const normalizedPiece = sourceCluster.normalize("NFKC").toLocaleLowerCase();
 
     for (const character of normalizedPiece) {
       if (/\s/u.test(character)) {
