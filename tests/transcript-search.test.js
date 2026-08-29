@@ -239,6 +239,13 @@ test("Transcript search exposes labelled bounded controls and live result count"
   assert.match(html, /id="transcriptSearchNext"[^>]*aria-label="Next search result"/);
 });
 
+test("Transcript search hides Chrome's native cancel button behind the custom clear control", () => {
+  assert.match(
+    styles,
+    /\.transcript-search-field input::\-webkit-search-cancel-button\s*\{[^}]*-webkit-appearance:\s*none;[^}]*appearance:\s*none;[^}]*display:\s*none;/,
+  );
+});
+
 test("Transcript search state is video-scoped and navigation wraps", () => {
   const {
     createTranscriptSearchState,
