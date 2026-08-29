@@ -292,7 +292,9 @@ function isYouTubeTabUrl(url) {
   }
 }
 
-async function closePanelForTab(tabId, windowId) {
+const panelReconciliations = new Map();
+
+async function closePanelForTab(tabId, windowId, isCurrent = () => true) {
   // Chrome 116 does not expose sidePanel.close. Disabling the tab below is
   // the compatibility path on older supported versions.
   if (typeof chrome.sidePanel.close !== "function") return;
@@ -305,22 +307,37 @@ async function closePanelForTab(tabId, windowId) {
     // window-level instance. Fall back to that exact window only.
   }
 
+  if (!isCurrent()) return;
   if (Number.isInteger(windowId)) {
     await chrome.sidePanel.close({ windowId }).catch(() => {});
   }
 }
 
 async function updatePanelForTab(tabId, url, windowId) {
-  if (!isYouTubeTabUrl(url)) {
-    await closePanelForTab(tabId, windowId);
-    await chrome.sidePanel.setOptions({ tabId, enabled: false }).catch(() => {});
-    return;
-  }
+  const snapshot = {};
+  panelReconciliations.set(tabId, snapshot);
+  const isCurrent = () => panelReconciliations.get(tabId) === snapshot;
 
-  // setOptions can reject if the tab just closed — ignore that harmlessly.
-  await chrome.sidePanel
-    .setOptions({ tabId, path: "sidepanel.html", enabled: true })
-    .catch(() => {});
+  try {
+    if (!isYouTubeTabUrl(url)) {
+      await closePanelForTab(tabId, windowId, isCurrent);
+      if (!isCurrent()) return;
+      await chrome.sidePanel
+        .setOptions({ tabId, enabled: false })
+        .catch(() => {});
+      if (!isCurrent()) return;
+      return;
+    }
+
+    if (!isCurrent()) return;
+    // setOptions can reject if the tab just closed — ignore that harmlessly.
+    await chrome.sidePanel
+      .setOptions({ tabId, path: "sidepanel.html", enabled: true })
+      .catch(() => {});
+    if (!isCurrent()) return;
+  } finally {
+    if (isCurrent()) panelReconciliations.delete(tabId);
+  }
 }
 
 function getNavigationUrl(changeInfo, tab) {
@@ -3007,6 +3024,7 @@ globalThis.__YTD_TRANSLATION_TESTING__ = {
 
 globalThis.__YTD_BACKGROUND_TESTING__ = {
   closePanelForTab,
+  getPanelReconciliationCount: () => panelReconciliations.size,
   getNavigationUrl,
   isYouTubeTabUrl,
   updatePanelForTab,

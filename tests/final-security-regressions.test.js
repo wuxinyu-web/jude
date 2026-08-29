@@ -113,7 +113,7 @@ test("background relay targets only the exact active YouTube tab", async () => {
   const { calls, relay } = loadBackgroundRelayHarness([
     { id: 13, url: "https://www.youtube.com/watch?v=current" },
   ]);
-  const payload = { action: "seekTo", timestamp: 42 };
+  const payload = { action: "seekTo", seconds: 42 };
   const result = await relay(payload);
   assert.deepEqual(plain(calls.query), [{ active: true, lastFocusedWindow: true }]);
   assert.deepEqual(plain(calls.sendMessage), [{ tabId: 13, payload }]);

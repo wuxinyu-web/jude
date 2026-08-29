@@ -14,6 +14,16 @@ const backgroundScript = fs.readFileSync(
 );
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((done, fail) => {
+    resolve = done;
+    reject = fail;
+  });
+  return { promise, reject, resolve };
+}
+
 function createBackgroundPanelHarness({
   close,
   queryResult = [],
@@ -179,6 +189,44 @@ test("YouTube panel enables without attempting a close", async () => {
   ]);
 });
 
+test("stale non-YouTube reconciliation cannot disable a newer YouTube state", async () => {
+  const delayedTabClose = deferred();
+  const { calls, helpers } = createBackgroundPanelHarness({
+    close: async (options) => {
+      if (options.tabId === 7) return delayedTabClose.promise;
+    },
+  });
+
+  const staleNonYouTube = helpers.updatePanelForTab(
+    7,
+    "https://example.com/old",
+    3,
+  );
+  await Promise.resolve();
+  assert.deepEqual(plain(calls.close), [{ tabId: 7 }]);
+
+  // Another tab must reconcile independently while tab 7's close is pending.
+  await helpers.updatePanelForTab(
+    8,
+    "https://www.youtube.com/watch?v=other",
+    4,
+  );
+  await helpers.updatePanelForTab(
+    7,
+    "https://www.youtube.com/watch?v=current",
+    3,
+  );
+  delayedTabClose.reject(new Error("stale tab close"));
+  await staleNonYouTube;
+
+  assert.deepEqual(plain(calls.close), [{ tabId: 7 }]);
+  assert.deepEqual(plain(calls.setOptions), [
+    { tabId: 8, path: "sidepanel.html", enabled: true },
+    { tabId: 7, path: "sidepanel.html", enabled: true },
+  ]);
+  assert.equal(helpers.getPanelReconciliationCount(), 0);
+});
+
 test("tab update and activation listeners reconcile navigation with window context", async () => {
   const { calls, listeners } = createBackgroundPanelHarness({
     close: async ({ tabId }) => {
@@ -191,6 +239,7 @@ test("tab update and activation listeners reconcile navigation with window conte
     { url: "https://example.com/url-change" },
     { url: "https://www.youtube.com/watch?v=old", windowId: 3 },
   );
+  await new Promise((resolve) => setImmediate(resolve));
   listeners.updated(
     7,
     { status: "loading" },
@@ -200,22 +249,24 @@ test("tab update and activation listeners reconcile navigation with window conte
       windowId: 3,
     },
   );
+  await new Promise((resolve) => setImmediate(resolve));
   listeners.updated(
     7,
     { status: "complete" },
     { url: "https://example.com/complete", windowId: 3 },
   );
+  await new Promise((resolve) => setImmediate(resolve));
   await listeners.activated({ tabId: 7, windowId: 9 });
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.deepEqual(plain(calls.close), [
     { tabId: 7 },
-    { tabId: 7 },
-    { tabId: 7 },
+    { windowId: 3 },
     { tabId: 7 },
     { windowId: 3 },
+    { tabId: 7 },
     { windowId: 3 },
-    { windowId: 3 },
+    { tabId: 7 },
     { windowId: 9 },
   ]);
   assert.equal(calls.setOptions.length, 4);
