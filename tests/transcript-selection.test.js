@@ -112,6 +112,38 @@ test("Transcript reading positions round-trip per exact video in session storage
   assert.equal(Number.isFinite(savedA.updatedAt), true);
 });
 
+test("overlapping Transcript position saves cannot lose another video's entry", async () => {
+  const data = {};
+  const events = [];
+  const storage = {
+    async get(key) {
+      events.push("get");
+      const snapshot = Object.hasOwn(data, key)
+        ? { [key]: structuredClone(data[key]) }
+        : {};
+      await Promise.resolve();
+      return snapshot;
+    },
+    async set(value) {
+      events.push("set");
+      await Promise.resolve();
+      Object.assign(data, structuredClone(value));
+    },
+  };
+  const helpers = loadTranscriptViewStateHelpers({ sessionStorage: storage });
+
+  await Promise.all([
+    helpers.saveTranscriptViewState("video-A", 10),
+    helpers.saveTranscriptViewState("video-B", 20),
+  ]);
+
+  assert.deepEqual(Object.keys(data.ytd_transcript_view_state).sort(), [
+    "video-A",
+    "video-B",
+  ]);
+  assert.deepEqual(events, ["get", "set", "get", "set"]);
+});
+
 test("Transcript reading-position helpers reject invalid input and stored values", async () => {
   const storage = createSessionStorage({
     ytd_transcript_view_state: {
@@ -223,6 +255,28 @@ test("Transcript reading positions fail safely when session storage is unavailab
     setFailureHelpers.saveTranscriptViewState("video-A", 10),
   );
   assert.equal(setAttempts, 1);
+
+  const recoveringStorage = createSessionStorage();
+  const originalSet = recoveringStorage.set.bind(recoveringStorage);
+  let failFirstMutation = true;
+  recoveringStorage.set = async (value) => {
+    if (failFirstMutation) {
+      failFirstMutation = false;
+      throw new Error("first mutation failed");
+    }
+    await originalSet(value);
+  };
+  const recoveringHelpers = loadTranscriptViewStateHelpers({
+    sessionStorage: recoveringStorage,
+  });
+  await Promise.all([
+    recoveringHelpers.saveTranscriptViewState("video-failed", 10),
+    recoveringHelpers.saveTranscriptViewState("video-recovered", 20),
+  ]);
+  assert.deepEqual(
+    plain(await recoveringHelpers.loadTranscriptViewState("video-recovered")),
+    { videoId: "video-recovered", scrollTop: 20 },
+  );
 });
 
 test("the panel reconciles against only the active tab in the last-focused window", () => {

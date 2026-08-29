@@ -199,6 +199,7 @@ let pendingTranscriptViewState = null;
 let transcriptViewStateSaveTimer = null;
 let isRestoringTranscriptView = false;
 let lastTranscriptScrollTop = 0;
+let transcriptViewStateMutationQueue = Promise.resolve();
 
 /**
  * Reading position is intentionally session-only. Returning null instead of
@@ -273,7 +274,7 @@ async function saveTranscriptViewState(videoId, scrollTop) {
   const storage = getTranscriptViewStateStorage();
   if (!storage) return;
 
-  try {
+  const mutation = transcriptViewStateMutationQueue.then(async () => {
     const result = await storage.get(TRANSCRIPT_VIEW_STATE_KEY);
     const storedStates = result?.[TRANSCRIPT_VIEW_STATE_KEY];
     const previousEntries =
@@ -302,6 +303,13 @@ async function saveTranscriptViewState(videoId, scrollTop) {
         .slice(0, TRANSCRIPT_VIEW_STATE_LIMIT),
     );
     await storage.set({ [TRANSCRIPT_VIEW_STATE_KEY]: recentStates });
+  });
+
+  // Always recover the internal chain so one unavailable/failed session write
+  // cannot prevent a later reading-position save from running.
+  transcriptViewStateMutationQueue = mutation.catch(() => {});
+  try {
+    await mutation;
   } catch (error) {
     // Session storage can disappear while Chrome tears down the panel. The
     // visible Transcript remains usable; only position persistence is skipped.
