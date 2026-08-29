@@ -1,6 +1,6 @@
 # Privacy
 
-Effective: August 23, 2026
+Effective: August 29, 2026
 
 YouTube Digest is a GitHub-only, bring-your-own-key Chrome extension. It has no YouTube Digest account, developer-operated backend, analytics, advertising, or telemetry.
 
@@ -18,8 +18,9 @@ Depending on the feature you use, YouTube Digest handles:
 - vocabulary you save, including selected text, Chinese meaning and explanation, optional AI-generated phonetic text, context, video title, and timestamp;
 - questions you ask, recent in-memory Ask conversation context, and generated suggested questions;
 - an optional web search query and validated result metadata when Ask Web is on;
-- Supadata, DeepSeek, and optional Tavily configuration, including API keys; and
-- cached transcript, digest, translation, vocabulary, and suggestion results, including an optional generated transcript after you explicitly confirm audio transcription.
+- Supadata, DeepSeek, and optional Tavily configuration, including API keys;
+- cached transcript, digest, translation, vocabulary, and suggestion results, including an optional generated transcript after you explicitly confirm audio transcription; and
+- session-only Transcript reading positions for up to 20 recent videos.
 
 ## Where data goes
 
@@ -58,6 +59,7 @@ YouTube Digest uses Chrome's local extension storage, not a YouTube Digest cloud
 - Vocabulary is limited to 500 entries and is saved locally until you delete entries or clear extension data.
 - Exactly three generated suggested questions per video are stored locally with cached video data.
 - Ask conversation history is held only in panel memory and is not persisted. It clears when you switch videos or when the panel closes.
+- Chrome `storage.session` stores Transcript reading positions for up to 20 recent videos. Only `scrollTop` and an update time are kept, and they are removed when the browser session ends.
 - Recent transcript, digest, and per-segment translation cache entries are stored
   locally. The cache is limited to 20 videos, and entries older than 30 days are
   removed when the side panel opens.
@@ -80,7 +82,7 @@ Clearing local data does not delete information already processed or retained by
 YouTube Digest uses Chrome permissions for these purposes:
 
 - `sidePanel`: display the YouTube Digest interface beside YouTube.
-- `storage`: store settings, keys, notes, vocabulary, suggestions, and cached results locally.
+- `storage`: store settings, keys, notes, vocabulary, suggestions, cached results, and session-only Transcript reading positions.
 - `tabs`: identify and interact with the active YouTube tab.
 - `scripting`: coordinate the extension's YouTube page controls.
 - YouTube host access: read the active video's URL and metadata and provide timestamp controls.

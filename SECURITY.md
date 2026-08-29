@@ -34,6 +34,8 @@ Examples include:
 
 Transcript text, video metadata, web results, and model output are untrusted data. Provider output must not be treated as instructions or executable markup. Tavily source URLs must be validated source URLs before rendering; all displayed text must be escaped, and transcript, conversation, search, storage, and rendering work must remain bounded.
 
+The side panel and message relay use the active YouTube tab only and fail closed on other pages. Transcript search is bounded literal string matching, not a user-built regular expression, and its marks must preserve escaped content and existing Vocabulary highlights.
+
 Vocabulary speech is local and sends no audio to any provider. The installed Chrome or system voice may vary, but speech playback must not add a remote audio dependency without an explicit privacy and permission review.
 
 ## User security guidance

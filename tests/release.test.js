@@ -23,7 +23,59 @@ test("manifest uses minimized install-time permissions", () => {
     "https://api.tavily.com/*",
   ]);
   assert.equal(Object.hasOwn(manifest, "optional_host_permissions"), false);
-  assert.equal(manifest.version, "1.1.4");
+  assert.equal(manifest.version, "1.3.0");
+  assert.equal(`youtube-digest-v${manifest.version}.zip`, "youtube-digest-v1.3.0.zip");
+});
+
+test("v1.3.0 release docs describe only the selectively integrated features", () => {
+  const readme = read("README.md");
+  const chineseReadme = read("README.zh-CN.md");
+  const privacy = read("PRIVACY.md");
+  const security = read("SECURITY.md");
+  const guide = read("AGENTS.md");
+  const architecture = read("docs/ARCHITECTURE.md");
+  const publicDocs = [readme, chineseReadme, privacy, security, architecture].join("\n");
+
+  assert.match(readme, /^## New in v1\.3\.0$/m);
+  assert.match(chineseReadme, /^## v1\.3\.0 更新$/m);
+  assert.match(readme, /literal Transcript search[\s\S]*previous[\s\S]*next/i);
+  assert.match(chineseReadme, /字面匹配的 Transcript 搜索[\s\S]*上一个[\s\S]*下一个/);
+  assert.match(readme, /reading position[\s\S]*current video[\s\S]*session/i);
+  assert.match(chineseReadme, /阅读位置[\s\S]*当前视频[\s\S]*会话/);
+  assert.match(readme, /active YouTube tab only/i);
+  assert.match(chineseReadme, /只使用当前活动的 YouTube 标签页/);
+
+  assert.match(privacy, /Chrome `storage\.session`[\s\S]*Transcript reading positions[\s\S]*20 videos/i);
+  assert.match(privacy, /removed when the browser session ends/i);
+  assert.match(security, /active YouTube tab only/i);
+  assert.match(security, /literal[\s\S]*regular expression/i);
+  assert.match(guide, /Transcript search[\s\S]*literal[\s\S]*Vocabulary/i);
+  assert.match(guide, /reading position[\s\S]*`chrome\.storage\.session`[\s\S]*20/i);
+  assert.match(architecture, /^## Transcript search and reading position$/m);
+  assert.match(architecture, /active YouTube tab only/i);
+
+  assert.doesNotMatch(publicDocs, /global language (?:switch|selector)/i);
+  assert.doesNotMatch(publicDocs, /Notes (?:are )?automatically translated/i);
+  assert.doesNotMatch(publicDocs, /<img\b|^!\[[^\]]*\]\([^)]*\)/im);
+});
+
+test("DeepSeek pricing copy is dated and covers off-peak and peak rates", () => {
+  const readme = read("README.md");
+  const chineseReadme = read("README.zh-CN.md");
+
+  for (const document of [readme, chineseReadme]) {
+    assert.match(document, /api-docs\.deepseek\.com\/quick_start\/pricing/);
+    assert.match(document, /\$0\.007[\s\S]*\$0\.014/);
+    assert.match(document, /\$0\.22[\s\S]*\$0\.44/);
+    assert.match(document, /\$0\.66[\s\S]*\$1\.32/);
+    assert.match(document, /01:00[\s\S]*04:00[\s\S]*06:00[\s\S]*10:00[\s\S]*UTC/);
+    assert.match(document, /\$0\.003[\s\S]*\$0\.010[\s\S]*\$0\.005[\s\S]*\$0\.020/);
+  }
+
+  assert.match(readme, /Current as of August 29, 2026/);
+  assert.match(chineseReadme, /截至 2026 年 8 月 29 日/);
+  assert.match(readme, /prices can change/i);
+  assert.match(chineseReadme, /价格可能变化/);
 });
 
 test("release copy documents current scope without em dashes", () => {
@@ -117,17 +169,17 @@ test("release copy documents current scope without em dashes", () => {
   assert.match(readme, /api-docs\.deepseek\.com\/quick_start\/pricing/i);
   assert.match(readme, /api-docs\.deepseek\.com\/quick_start\/token_usage/i);
   assert.match(readme, /api-docs\.deepseek\.com\/guides\/kv_cache/i);
-  assert.match(readme, /\$0\.0028[\s\S]*\$0\.14[\s\S]*\$0\.28/);
+  assert.match(readme, /\$0\.007[\s\S]*\$0\.014[\s\S]*\$0\.22[\s\S]*\$0\.44[\s\S]*\$0\.66[\s\S]*\$1\.32/);
   assert.match(readme, /2,935 spoken English words/i);
   assert.match(readme, /about 32,600 input tokens/i);
-  assert.match(readme, /\$0\.002[^\n]*\$0\.006 USD/i);
+  assert.match(readme, /\$0\.003[^\n]*\$0\.010 USD[\s\S]*\$0\.005[^\n]*\$0\.020 USD/i);
   assert.match(chineseReadme, /api-docs\.deepseek\.com\/quick_start\/pricing/i);
   assert.match(chineseReadme, /api-docs\.deepseek\.com\/quick_start\/token_usage/i);
   assert.match(chineseReadme, /api-docs\.deepseek\.com\/guides\/kv_cache/i);
-  assert.match(chineseReadme, /\u00a50\.02[\s\S]*\u00a51[\s\S]*\u00a52/);
+  assert.match(chineseReadme, /\$0\.007[\s\S]*\$0\.014[\s\S]*\$0\.22[\s\S]*\$0\.44[\s\S]*\$0\.66[\s\S]*\$1\.32/);
   assert.match(chineseReadme, /2,935 \u4e2a\u82f1\u6587\u53e3\u8bed\u8bcd/);
   assert.match(chineseReadme, /\u7ea6 32,600 \u4e2a\u8f93\u5165 token/);
-  assert.match(chineseReadme, /\$0\.002[^\n]*\$0\.006 USD/);
+  assert.match(chineseReadme, /\$0\.003[^\n]*\$0\.010 USD[\s\S]*\$0\.005[^\n]*\$0\.020 USD/);
   assert.match(chineseReadme, /dash\.supadata\.ai\/auth\/sign-up/i);
   assert.match(chineseReadme, /platform\.deepseek\.com\/api_keys/i);
   assert.match(readme, /^### The Digest button is missing on a YouTube video$/m);

@@ -14,6 +14,12 @@ Turn every YouTube video into a resource for deep learning. YouTube Digest bring
 
 YouTube Digest is a bring-your-own-key project installed locally from GitHub. It is not available through the Chrome Web Store, does not include API credits, and does not run a developer-operated server.
 
+## New in v1.3.0
+
+- Find exact words or phrases with bounded literal Transcript search, then move between the previous and next match without changing the video time.
+- Resume the current video's Transcript reading position during the same browser session. Up to 20 recent video positions are kept in session storage and disappear when the browser session ends.
+- Keep the side panel tied to the active YouTube tab only, so a background YouTube tab cannot silently replace the video you are studying.
+
 ## Install with your coding agent
 
 You do not need to understand the code or use the command line. Send this message to your coding agent:
@@ -115,10 +121,14 @@ Keys and settings are stored in Chrome's local extension storage on your device.
 - Native subtitle tracks returned by Supadata. YouTube Digest prefers English when available, but may show another native language.
 - User-confirmed AI transcription from video audio when no native subtitle track exists.
 - Original, Simplified Chinese, and aligned bilingual transcript views.
+- Bounded literal Transcript search with previous and next match navigation that coexists with Vocabulary highlights.
+- Session-only Transcript reading-position restore for up to 20 recent videos.
 - AI overviews with full-video summaries, selected-text explanations in English, Chinese, or bilingual form, translation, Ask, vocabulary enrichment, and automatic transcript-note polishing.
 - A Library with local Notes and Vocabulary views, plus a local cache for recent transcript and digest results.
 - Current-video multi-turn Ask with three video-specific suggestions and optional user-controlled Tavily web search.
 - DeepSeek V4 Flash for all published AI features. Other providers require a local code adaptation and are not supported by this published version.
+
+The side panel uses the active YouTube tab only. If the active tab is not a supported YouTube watch page, YouTube Digest closes or disables the panel instead of borrowing content from another YouTube tab.
 
 Shorts, live streams, private or access-restricted videos may not work. Firefox, Safari, mobile browsers, and other Chromium browsers are not currently tested or supported.
 
@@ -158,17 +168,19 @@ Current as of August 23, 2026, Tavily's official [credit documentation](https://
 
 ## DeepSeek V4 Flash translation cost estimate
 
-Current as of August 10, 2026, DeepSeek lists the following prices per 1 million tokens on its official [pricing page](https://api-docs.deepseek.com/quick_start/pricing/):
+Current as of August 29, 2026, DeepSeek lists the following DeepSeek V4 Flash prices per 1 million tokens on its official [pricing page](https://api-docs.deepseek.com/quick_start/pricing/):
 
-- Cache-hit input: **$0.0028 USD**.
-- Cache-miss input: **$0.14 USD**.
-- Output: **$0.28 USD**.
+| Token type | Off-peak | Peak |
+| --- | ---: | ---: |
+| Cache-hit input | **$0.007 USD** | **$0.014 USD** |
+| Cache-miss input | **$0.22 USD** | **$0.44 USD** |
+| Output | **$0.66 USD** | **$1.32 USD** |
 
-DeepSeek says these prices may increase soon, so check the current pricing page before relying on this estimate. Its official [token usage guide](https://api-docs.deepseek.com/quick_start/token_usage/) estimates about 0.3 token per English character and about 0.6 token per Chinese character. Its [context caching guide](https://api-docs.deepseek.com/guides/kv_cache/) explains the automatic best-effort disk cache used for repeated prefixes.
+Peak pricing applies Monday through Friday from **01:00-04:00 UTC** and **06:00-10:00 UTC**. All other times use off-peak pricing. Prices can change, so check the current pricing page before relying on this estimate. DeepSeek's official [token usage guide](https://api-docs.deepseek.com/quick_start/token_usage/) estimates about 0.3 token per English character and about 0.6 token per Chinese character. Its [context caching guide](https://api-docs.deepseek.com/guides/kv_cache/) explains the automatic best-effort disk cache used for repeated prefixes.
 
 A measured 20-minute English talk contained **2,935 spoken English words** and 15,433 transcript characters. With YouTube Digest's current grouping, it became 128 semantic segments and 43 requests of three segments each. Repeated prompts and JSON brought the rendered input to about 108,528 English characters, or **about 32,600 input tokens** using DeepSeek's 0.3 token per English character heuristic. The translated Chinese JSON output is estimated at about 3,500 to 4,500 tokens using the 0.6 token per Chinese character heuristic, plus JSON and ID overhead.
 
-If all input is billed as cache miss, input costs about $0.0046 and output costs about $0.0010 to $0.0013, for a total of about $0.0056 to $0.0059. When much of the repeated system prompt hits DeepSeek's automatic best-effort cache, a realistic lower end is about $0.002 to $0.003. A practical estimate for fully translating this talk is therefore **$0.002 to $0.006 USD, about ¥0.02 to ¥0.04**.
+A practical estimate for fully translating this talk is **$0.003 to $0.010 USD off-peak** or **$0.005 to $0.020 USD at peak**, depending mainly on cache hits and output length.
 
 Translation is lazy and progressive. Cached segments are reused, and only rows you request by scrolling into them incur calls. Retries, provider behavior, and pricing changes can increase the final cost.
 
@@ -197,7 +209,7 @@ YouTube Digest makes provider requests directly from the extension:
 1. It sends a canonical YouTube watch URL to Supadata to request the native transcript. If none exists, Supadata processes the video's audio only after you choose **Generate transcript from audio** and confirm the estimated credit use.
 2. It sends transcript and metadata to DeepSeek for Overview and Ask. Ask includes only bounded recent conversation history. Explain and Vocabulary send selected text and nearby context; translation sends the requested content.
 3. When Ask Web is on, it sends a query derived from the title, question, and available overview directly to Tavily. Web is off by default and no Tavily request occurs while it stays off.
-4. It stores keys, settings, notes, vocabulary, exactly three cached suggested questions per video, and recent cache entries locally in Chrome. Ask conversation history is not persisted.
+4. It stores keys, settings, notes, vocabulary, exactly three cached suggested questions per video, and recent cache entries locally in Chrome. Ask conversation history is not persisted. Transcript reading positions use Chrome session storage and are removed when the browser session ends.
 5. Vocabulary speech uses local Chrome or system voices and does not send or store audio.
 
 There is no YouTube Digest account system, advertising, analytics, or telemetry. Supadata, DeepSeek, and optional Tavily requests are made under each provider's terms and privacy policy. See [PRIVACY.md](PRIVACY.md) for details.

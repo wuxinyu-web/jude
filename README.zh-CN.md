@@ -14,6 +14,12 @@
 
 YouTube Digest 是一个需要自行提供 API Key 的开源项目，通过 GitHub 安装。目前没有上架 Chrome 应用商店，不赠送 API 额度，也没有开发者运营的服务器。
 
+## v1.3.0 更新
+
+- 新增字面匹配的 Transcript 搜索，可在上一个和下一个结果之间跳转，不会改变视频播放时间。
+- 同一浏览器会话内会恢复当前视频的 Transcript 阅读位置。会话存储最多保留 20 个最近视频的位置，浏览器会话结束后自动清除。
+- 侧边栏只使用当前活动的 YouTube 标签页，后台 YouTube 标签页不会悄然替换你正在学习的视频。
+
 ## 让你的编程 Agent 帮你安装
 
 你不需要看懂代码，也不需要会使用命令行。把下面这段话发送给你的编程 Agent：
@@ -115,10 +121,14 @@ API Key 和设置保存在你设备上的 Chrome 扩展本地存储中。发布�
 - Supadata 能够返回的原生字幕。YouTube Digest 会优先请求英文字幕，也可能显示其他可用的原生语言。
 - 没有原生字幕时，由用户确认后从视频音轨生成 AI 转录。
 - 原文、简体中文和双语对照字幕。
+- 有上一个和下一个结果导航的有界字面 Transcript 搜索，并且与 Vocabulary 高亮兼容。
+- 最多 20 个最近视频的会话级 Transcript 阅读位置恢复。
 - 包含全文摘要的 AI 概览、英文/中文/双语选中文本讲解、翻译、Ask、单词信息和字幕笔记自动润色。
 - Library 内包含本地 Notes 和 Vocabulary，以及按视频保存的字幕、概览和翻译缓存。
 - 支持当前视频多轮 Ask、3 个视频专属推荐问题，以及由用户控制的 Tavily 联网搜索。
 - 发布版本的所有 AI 功能都使用 DeepSeek V4 Flash。其他服务需要修改本地代码，不属于发布版本的支持范围。
+
+侧边栏只使用当前活动的 YouTube 标签页。如果当前标签页不是支持的 YouTube 视频页，YouTube Digest 会关闭或禁用侧边栏，而不是借用其他 YouTube 标签页的内容。
 
 Shorts、直播、私密视频和受访问限制的视频可能无法使用。目前没有测试 Firefox、Safari、移动浏览器或其他 Chromium 浏览器。
 
@@ -158,17 +168,19 @@ DeepSeek 的额度与 Supadata 分开计算。DeepSeek 可能有自己的免费�
 
 ## DeepSeek V4 Flash 翻译成本估算
 
-截至 2026 年 8 月 10 日，DeepSeek 官方[价格页面](https://api-docs.deepseek.com/quick_start/pricing/)列出的每 100 万 token 价格是：
+截至 2026 年 8 月 29 日，DeepSeek 官方[价格页面](https://api-docs.deepseek.com/quick_start/pricing/)列出的 DeepSeek V4 Flash 每 100 万 token 价格是：
 
-- 缓存命中输入：**¥0.02**。
-- 缓存未命中输入：**¥1**。
-- 输出：**¥2**。
+| Token 类型 | 非高峰时段 | 高峰时段 |
+| --- | ---: | ---: |
+| 缓存命中输入 | **$0.007 USD** | **$0.014 USD** |
+| 缓存未命中输入 | **$0.22 USD** | **$0.44 USD** |
+| 输出 | **$0.66 USD** | **$1.32 USD** |
 
-DeepSeek 说明这些价格可能很快上调，因此使用此估算前必须查看当前价格页面。官方 [token 用量指南](https://api-docs.deepseek.com/quick_start/token_usage/)估算每个英文字符约为 0.3 token，每个中文字符约为 0.6 token。[上下文缓存指南](https://api-docs.deepseek.com/guides/kv_cache/)说明了重复前缀使用的自动尽力而为磁盘缓存。
+高峰价格在周一至周五的 **01:00-04:00** 和 **06:00-10:00 UTC** 生效，其他时间使用非高峰价格。价格可能变化，使用此估算前请查看当前价格页面。官方 [token 用量指南](https://api-docs.deepseek.com/quick_start/token_usage/)估算每个英文字符约为 0.3 token，每个中文字符约为 0.6 token。[上下文缓存指南](https://api-docs.deepseek.com/guides/kv_cache/)说明了重复前缀使用的自动尽力而为磁盘缓存。
 
 一个实测的 20 分钟英文演讲包含 **2,935 个英文口语词**和 15,433 个字幕字符。按 YouTube Digest 当前的分组方式，它会变成 128 个语义分段，以每次 3 段的方式发出 43 次请求。算上重复 prompt 和 JSON 后，渲染后的输入约为 108,528 个英文字符，按官方每个英文字符 0.3 token 的经验值，即**约 32,600 个输入 token**。按每个中文字符 0.6 token 的经验值，再加上 JSON 和 ID 开销，中文 JSON 输出估计为 3,500 到 4,500 token。
 
-如果所有输入都按缓存未命中计费，输入约 $0.0046，输出约 $0.0010 到 $0.0013，总计约 $0.0056 到 $0.0059。当大量重复的 system prompt 命中 DeepSeek 自动尽力而为缓存时，更现实的低值约为 $0.002 到 $0.003。完整翻译这段演讲的实用估算是 **$0.002 到 $0.006 USD，约 ¥0.02 到 ¥0.04**。
+完整翻译这段演讲的实用估算是：**非高峰时段 $0.003 到 $0.010 USD**，或 **高峰时段 $0.005 到 $0.020 USD**，主要取决于缓存命中情况和输出长度。
 
 翻译是延迟按需和渐进式的。已缓存的分段会复用，只有滚动到并请求的字幕行才会发起调用。重试、服务商行为和价格变化都可能增加最终成本。
 
@@ -197,7 +209,7 @@ YouTube Digest 会直接从扩展向服务商发送请求：
 1. 把标准化的 YouTube 视频地址发送给 Supadata，用于获取原生字幕。如果没有原生字幕，只有当你选择 **Generate transcript from audio** 并确认预计额度后，Supadata 才会处理视频音轨。
 2. Overview 和 Ask 会把字幕和视频信息发送给 DeepSeek，Ask 只带有限的对话历史。Explain 和 Vocabulary 会发送选中文本和附近上下文；翻译只发送请求的内容。
 3. Ask Web 开启时，把从标题、问题和可用 Overview 派生的查询直接发送给 Tavily。Web 默认关闭，保持关闭时不会向 Tavily 发送请求。
-4. API Key、设置、Notes、Vocabulary、每个视频恰好 3 个缓存的推荐问题，以及字幕、概览和翻译缓存保存在 Chrome 本地。Ask 对话历史不会持久化。
+4. API Key、设置、Notes、Vocabulary、每个视频恰好 3 个缓存的推荐问题，以及字幕、概览和翻译缓存保存在 Chrome 本地。Ask 对话历史不会持久化。Transcript 阅读位置使用 Chrome 会话存储，浏览器会话结束后会被清除。
 5. Vocabulary 发音使用本地 Chrome 或系统语音，不会发送或保存音频。
 
 YouTube Digest 没有账号系统、广告、分析统计或行为追踪。Supadata、DeepSeek 和可选 Tavily 请求仍会按照各自的条款和隐私政策处理数据。详情请查看 [PRIVACY.md](PRIVACY.md)。

@@ -5,6 +5,7 @@
 1. Explain supports English, Simplified Chinese, and bilingual modes.
 2. Ask provides transcript-grounded suggestions and session-only multi-turn conversation, with optional Tavily web search.
 3. Library keeps Notes and Vocabulary separate while supporting reusable learning entries and cross-video highlighting.
+4. Transcript supports safe literal search and session-only reading-position restore without changing playback or borrowing a background tab.
 
 ## Navigation and interaction
 
@@ -15,6 +16,14 @@ Selecting text inside any rendered Transcript language mode opens a two-action s
 Ask opens with three fixed actions (Summarize video, Recommend related content, Quiz me), three AI-generated video-specific questions, a message history, and a sticky composer. A Web control is off by default. Recommend related content turns Web on automatically. Other questions use Tavily only when Web is visibly enabled.
 
 Ask answers follow the language of the user's question. Conversation history exists only for the current panel session and video. Changing videos or closing the side panel clears it.
+
+## Transcript search and reading position
+
+Transcript search is local, literal, case-insensitive where appropriate, and bounded to a 200-character query. It navigates previous and next matches with wraparound, pauses auto-follow when the user moves to a match, and never seeks video playback. Search marks are separate from Vocabulary marks, so clearing or reapplying search preserves saved Vocabulary highlighting.
+
+The side panel saves only `scrollTop` and an update time in Chrome `storage.session`, keyed by video ID. It retains at most 20 recent video positions and removes them automatically when the browser session ends. Restore happens only after the matching video's Transcript has rendered; stale video snapshots are ignored.
+
+Both the background relay and the side panel resolve the active YouTube tab only. If that active tab is not a supported watch page, the panel closes or disables instead of selecting a background YouTube tab.
 
 ## Explain data flow
 

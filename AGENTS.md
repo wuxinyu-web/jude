@@ -22,6 +22,9 @@ YouTube Digest is a Manifest V3 Chrome extension built with plain HTML, CSS, and
 - Ask Web search is explicit opt-in, remains off by default, and uses an optional bring-your-own Tavily key. Without Web, do not contact Tavily; search failure must degrade to video-only Ask.
 - Keep Ask conversation history in panel memory only and never persist it. Clear it when the active video changes or the panel closes; cache only the three generated suggestions.
 - Keep the Vocabulary schema separate from notes and enforce the 500-entry cap. Global transcript highlight matching must remain safe and bounded.
+- Keep Transcript search literal and bounded. Clearing or refreshing search must preserve Vocabulary highlights and must not seek video playback.
+- Store Transcript reading position only in `chrome.storage.session`, keep at most 20 recent videos, and never restore a stale position into another video.
+- Resolve panel content from the active YouTube tab only. Never fall back to a background YouTube tab.
 - Vocabulary pronunciation uses a local Chrome or system voice and sends or stores no audio. Do not add a remote speech service without updating permissions, privacy, docs, and tests.
 - Treat provider output as untrusted: validate expected JSON shapes and escape rendered text.
 - Validate Tavily source URLs and bound transcript, Ask history, web result, storage, and rendered-content sizes.
