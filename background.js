@@ -281,25 +281,69 @@ chrome.runtime.onInstalled.addListener(({ reason }) => {
  * The original code only handled onUpdated, which is why the panel stayed
  * visible when switching to an already-loaded non-YouTube tab.
  */
-function updatePanelForTab(tabId, url) {
-  const isYouTube = (url || "").startsWith("https://www.youtube.com");
+function isYouTubeTabUrl(url) {
+  try {
+    const parsed = new URL(url);
+    return (
+      parsed.protocol === "https:" && parsed.hostname === "www.youtube.com"
+    );
+  } catch (error) {
+    return false;
+  }
+}
+
+async function closePanelForTab(tabId, windowId) {
+  // Chrome 116 does not expose sidePanel.close. Disabling the tab below is
+  // the compatibility path on older supported versions.
+  if (typeof chrome.sidePanel.close !== "function") return;
+
+  try {
+    await chrome.sidePanel.close({ tabId });
+    return;
+  } catch (error) {
+    // Newer Chrome releases can reject tabId when the visible side panel is a
+    // window-level instance. Fall back to that exact window only.
+  }
+
+  if (Number.isInteger(windowId)) {
+    await chrome.sidePanel.close({ windowId }).catch(() => {});
+  }
+}
+
+async function updatePanelForTab(tabId, url, windowId) {
+  if (!isYouTubeTabUrl(url)) {
+    await closePanelForTab(tabId, windowId);
+    await chrome.sidePanel.setOptions({ tabId, enabled: false }).catch(() => {});
+    return;
+  }
+
   // setOptions can reject if the tab just closed — ignore that harmlessly.
-  chrome.sidePanel
-    .setOptions({ tabId, path: "sidepanel.html", enabled: isYouTube })
+  await chrome.sidePanel
+    .setOptions({ tabId, path: "sidepanel.html", enabled: true })
     .catch(() => {});
 }
 
-// A tab navigated to a new URL.
-chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-  if (!changeInfo.url) return; // ignore title/favicon-only updates
-  updatePanelForTab(tabId, changeInfo.url);
+function getNavigationUrl(changeInfo, tab) {
+  if (changeInfo.url) return changeInfo.url;
+  if (changeInfo.status !== "loading" && changeInfo.status !== "complete") {
+    return "";
+  }
+  return tab?.pendingUrl || tab?.url || "";
+}
+
+// Reconcile at both navigation start and completion because Chrome can reset
+// tab-specific side-panel state while a navigation commits.
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  const url = getNavigationUrl(changeInfo, tab);
+  if (!url) return; // Ignore title and favicon-only updates.
+  void updatePanelForTab(tabId, url, tab?.windowId);
 });
 
 // The user switched to a different tab (or opened a new one).
-chrome.tabs.onActivated.addListener(async ({ tabId }) => {
+chrome.tabs.onActivated.addListener(async ({ tabId, windowId }) => {
   try {
     const tab = await chrome.tabs.get(tabId);
-    updatePanelForTab(tabId, tab.url);
+    void updatePanelForTab(tabId, tab.url || tab.pendingUrl, windowId);
   } catch (e) {
     // Tab vanished before we could read it — nothing to do.
   }
@@ -532,9 +576,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     debugLog("[YouTube Digest BG] Relay request:", message.payload?.action);
     (async () => {
       try {
-        // Query specifically for YouTube tabs to avoid side panel context issues
-        // Try multiple query strategies to find the right tab
-        let tabs = await chrome.tabs.query({
+        const tabs = await chrome.tabs.query({
           active: true,
           lastFocusedWindow: true,
         });
@@ -544,22 +586,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           tabs[0]?.url,
         );
 
-        // If no YouTube tab found, try broader query
-        if (!tabs[0] || !tabs[0].url?.includes("youtube.com")) {
-          tabs = await chrome.tabs.query({
-            url: "https://www.youtube.com/*",
-            active: true,
-          });
-          debugLog("[YouTube Digest BG] Active YouTube tabs:", tabs.length);
-        }
-
-        // Still nothing? Try any YouTube tab
-        if (!tabs[0]) {
-          tabs = await chrome.tabs.query({ url: "https://www.youtube.com/*" });
-          debugLog("[YouTube Digest BG] Any YouTube tabs:", tabs.length);
-        }
-
-        if (tabs[0]) {
+        if (tabs[0] && isYouTubeTabUrl(tabs[0].url)) {
           debugLog(
             "[YouTube Digest BG] Sending to tab:",
             tabs[0].id,
@@ -596,8 +623,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           debugLog("[YouTube Digest BG] Got response from content:", response);
           sendResponse({ success: true, response });
         } else {
-          debugLog("[YouTube Digest BG] No YouTube tab found");
-          sendResponse({ success: false, error: "No YouTube tab found" });
+          debugLog("[YouTube Digest BG] No active YouTube tab found");
+          sendResponse({
+            success: false,
+            error: "No active YouTube tab found",
+          });
         }
       } catch (err) {
         console.error("[YouTube Digest BG] Relay error:", err.message);
@@ -2973,6 +3003,13 @@ globalThis.__YTD_TRANSLATION_TESTING__ = {
   handleFetchTranscript,
   pollTranscriptJob,
   handleExplainSelection,
+};
+
+globalThis.__YTD_BACKGROUND_TESTING__ = {
+  closePanelForTab,
+  getNavigationUrl,
+  isYouTubeTabUrl,
+  updatePanelForTab,
 };
 
 globalThis.__YTD_ASK_TESTING__ = {

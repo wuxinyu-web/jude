@@ -8,6 +8,223 @@ const contentScript = fs.readFileSync(
   path.resolve(__dirname, "..", "content.js"),
   "utf8",
 );
+const backgroundScript = fs.readFileSync(
+  path.resolve(__dirname, "..", "background.js"),
+  "utf8",
+);
+const plain = (value) => JSON.parse(JSON.stringify(value));
+
+function createBackgroundPanelHarness({
+  close,
+  queryResult = [],
+  tab = { id: 7, windowId: 3, url: "https://example.com" },
+} = {}) {
+  const calls = {
+    close: [],
+    query: [],
+    sendMessage: [],
+    setOptions: [],
+  };
+  const listeners = {};
+  const event = (name) => ({
+    addListener(listener) {
+      listeners[name] = listener;
+    },
+  });
+  const sidePanel = {
+    setPanelBehavior() {},
+    async setOptions(options) {
+      calls.setOptions.push(options);
+    },
+    async open() {},
+  };
+  if (close) {
+    sidePanel.close = async (options) => {
+      calls.close.push(options);
+      return close(options);
+    };
+  }
+  const sandbox = {
+    console: { ...console, error() {}, warn() {} },
+    URL,
+    TextDecoder,
+    TextEncoder,
+    AbortController,
+    setTimeout,
+    clearTimeout,
+    importScripts() {},
+    chrome: {
+      storage: {
+        local: {
+          setAccessLevel: async () => {},
+          get: async () => ({ ytd_settings: {} }),
+        },
+      },
+      action: { onClicked: event("actionClicked") },
+      sidePanel,
+      runtime: {
+        onInstalled: event("installed"),
+        onMessage: event("message"),
+        openOptionsPage() {},
+        getURL: (resource) => `chrome-extension://test/${resource}`,
+        sendMessage: async () => {},
+      },
+      tabs: {
+        onUpdated: event("updated"),
+        onActivated: event("activated"),
+        async get() {
+          return tab;
+        },
+        async query(options) {
+          calls.query.push(options);
+          return queryResult;
+        },
+        async sendMessage(tabId, payload) {
+          calls.sendMessage.push({ tabId, payload });
+          return { ok: true };
+        },
+      },
+      scripting: { executeScript: async () => [] },
+    },
+    YTD_SETTINGS: {
+      STORAGE_KEY: "ytd_settings",
+      normalize: (value) => value || {},
+      canonicalYouTubeUrl: (videoId) =>
+        `https://www.youtube.com/watch?v=${videoId}`,
+      chatCompletionsUrl: () =>
+        "https://api.deepseek.com/chat/completions",
+    },
+  };
+  sandbox.globalThis = sandbox;
+  vm.runInNewContext(backgroundScript, sandbox);
+  return {
+    calls,
+    helpers: sandbox.__YTD_BACKGROUND_TESTING__,
+    listeners,
+  };
+}
+
+test("background navigation URL reconciliation covers url, loading, and complete", () => {
+  const { helpers } = createBackgroundPanelHarness();
+  assert.ok(helpers, "background lifecycle helpers must be exposed");
+  assert.equal(
+    helpers.getNavigationUrl(
+      { url: "https://www.youtube.com/watch?v=one" },
+      { pendingUrl: "https://example.com/pending" },
+    ),
+    "https://www.youtube.com/watch?v=one",
+  );
+  assert.equal(
+    helpers.getNavigationUrl(
+      { status: "loading" },
+      {
+        pendingUrl: "https://example.com/pending",
+        url: "https://www.youtube.com/watch?v=old",
+      },
+    ),
+    "https://example.com/pending",
+  );
+  assert.equal(
+    helpers.getNavigationUrl(
+      { status: "complete" },
+      { url: "https://example.com/complete" },
+    ),
+    "https://example.com/complete",
+  );
+  assert.equal(
+    helpers.getNavigationUrl({ status: "unloaded" }, { url: "https://example.com" }),
+    "",
+  );
+});
+
+test("non-YouTube panel closes by tab and then disables the tab", async () => {
+  const { calls, helpers } = createBackgroundPanelHarness({
+    close: async () => {},
+  });
+  await helpers.updatePanelForTab(7, "https://example.com", 3);
+  assert.deepEqual(plain(calls.close), [{ tabId: 7 }]);
+  assert.deepEqual(plain(calls.setOptions), [{ tabId: 7, enabled: false }]);
+});
+
+test("non-YouTube panel falls back to window close and disables after close failures", async () => {
+  const { calls, helpers } = createBackgroundPanelHarness({
+    close: async () => {
+      throw new Error("panel already moved");
+    },
+  });
+  await helpers.updatePanelForTab(7, "https://example.com", 3);
+  assert.deepEqual(plain(calls.close), [{ tabId: 7 }, { windowId: 3 }]);
+  assert.deepEqual(plain(calls.setOptions), [{ tabId: 7, enabled: false }]);
+});
+
+test("Chrome 116 compatibility disables a non-YouTube tab without sidePanel.close", async () => {
+  const { calls, helpers } = createBackgroundPanelHarness();
+  await helpers.updatePanelForTab(7, "https://example.com", 3);
+  assert.deepEqual(calls.close, []);
+  assert.deepEqual(plain(calls.setOptions), [{ tabId: 7, enabled: false }]);
+});
+
+test("YouTube panel enables without attempting a close", async () => {
+  const { calls, helpers } = createBackgroundPanelHarness({
+    close: async () => {},
+  });
+  await helpers.updatePanelForTab(
+    7,
+    "https://www.youtube.com/watch?v=video",
+    3,
+  );
+  assert.deepEqual(calls.close, []);
+  assert.deepEqual(plain(calls.setOptions), [
+    { tabId: 7, path: "sidepanel.html", enabled: true },
+  ]);
+});
+
+test("tab update and activation listeners reconcile navigation with window context", async () => {
+  const { calls, listeners } = createBackgroundPanelHarness({
+    close: async ({ tabId }) => {
+      if (tabId) throw new Error("use window close");
+    },
+    tab: { id: 7, windowId: 9, url: "https://example.com/activated" },
+  });
+  listeners.updated(
+    7,
+    { url: "https://example.com/url-change" },
+    { url: "https://www.youtube.com/watch?v=old", windowId: 3 },
+  );
+  listeners.updated(
+    7,
+    { status: "loading" },
+    {
+      pendingUrl: "https://example.com/loading",
+      url: "https://www.youtube.com/watch?v=old",
+      windowId: 3,
+    },
+  );
+  listeners.updated(
+    7,
+    { status: "complete" },
+    { url: "https://example.com/complete", windowId: 3 },
+  );
+  await listeners.activated({ tabId: 7, windowId: 9 });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(plain(calls.close), [
+    { tabId: 7 },
+    { tabId: 7 },
+    { tabId: 7 },
+    { tabId: 7 },
+    { windowId: 3 },
+    { windowId: 3 },
+    { windowId: 3 },
+    { windowId: 9 },
+  ]);
+  assert.equal(calls.setOptions.length, 4);
+  assert.ok(
+    calls.setOptions.every(
+      (options) => options.tabId === 7 && options.enabled === false,
+    ),
+  );
+});
 
 class FakeElement {
   constructor({

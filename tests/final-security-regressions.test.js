@@ -7,6 +7,131 @@ const vm = require("node:vm");
 const root = path.resolve(__dirname, "..");
 const read = (file) => fs.readFileSync(path.join(root, file), "utf8");
 const nextTurn = () => new Promise((resolve) => setImmediate(resolve));
+const plain = (value) => JSON.parse(JSON.stringify(value));
+
+function loadBackgroundRelayHarness(activeTabs) {
+  const calls = { query: [], sendMessage: [] };
+  let messageListener;
+  const listeners = { addListener() {} };
+  const sandbox = {
+    console: { ...console, error() {}, warn() {} },
+    URL,
+    TextDecoder,
+    TextEncoder,
+    AbortController,
+    setTimeout,
+    clearTimeout,
+    importScripts() {},
+    chrome: {
+      storage: {
+        local: {
+          setAccessLevel: async () => {},
+          get: async () => ({ ytd_settings: {} }),
+        },
+      },
+      action: { onClicked: listeners },
+      sidePanel: {
+        setPanelBehavior() {},
+        setOptions: async () => {},
+        open: async () => {},
+      },
+      runtime: {
+        onInstalled: listeners,
+        onMessage: {
+          addListener(listener) {
+            messageListener = listener;
+          },
+        },
+        openOptionsPage() {},
+        getURL: (resource) => `chrome-extension://test/${resource}`,
+        sendMessage: async () => {},
+      },
+      tabs: {
+        onUpdated: listeners,
+        onActivated: listeners,
+        async query(options) {
+          calls.query.push(options);
+          if (Object.hasOwn(options, "url")) {
+            throw new Error("url-filtered tab fallback is forbidden");
+          }
+          return activeTabs;
+        },
+        async sendMessage(tabId, payload) {
+          calls.sendMessage.push({ tabId, payload });
+          return { from: tabId };
+        },
+      },
+      scripting: { executeScript: async () => [] },
+    },
+    YTD_SETTINGS: {
+      STORAGE_KEY: "ytd_settings",
+      normalize: (value) => value || {},
+      canonicalYouTubeUrl: (videoId) =>
+        `https://www.youtube.com/watch?v=${videoId}`,
+      chatCompletionsUrl: () =>
+        "https://api.deepseek.com/chat/completions",
+    },
+  };
+  sandbox.globalThis = sandbox;
+  vm.runInNewContext(read("background.js"), sandbox);
+
+  async function relay(payload = { action: "seekTo", timestamp: 10 }) {
+    return new Promise((resolve) => {
+      const keepAlive = messageListener(
+        { action: "relayToContent", payload },
+        {},
+        resolve,
+      );
+      assert.equal(keepAlive, true);
+    });
+  }
+
+  return { calls, relay };
+}
+
+test("background relay fails closed when the active last-focused tab is absent", async () => {
+  const { calls, relay } = loadBackgroundRelayHarness([]);
+  const result = await relay();
+  assert.deepEqual(plain(calls.query), [{ active: true, lastFocusedWindow: true }]);
+  assert.deepEqual(calls.sendMessage, []);
+  assert.equal(result.success, false);
+  assert.match(result.error, /active YouTube tab/i);
+});
+
+test("background relay rejects an active non-YouTube tab without borrowing a YouTube tab", async () => {
+  const { calls, relay } = loadBackgroundRelayHarness([
+    { id: 11, url: "https://example.com/article" },
+  ]);
+  const result = await relay();
+  assert.deepEqual(plain(calls.query), [{ active: true, lastFocusedWindow: true }]);
+  assert.deepEqual(calls.sendMessage, []);
+  assert.equal(result.success, false);
+  assert.match(result.error, /active YouTube tab/i);
+});
+
+test("background relay targets only the exact active YouTube tab", async () => {
+  const { calls, relay } = loadBackgroundRelayHarness([
+    { id: 13, url: "https://www.youtube.com/watch?v=current" },
+  ]);
+  const payload = { action: "seekTo", timestamp: 42 };
+  const result = await relay(payload);
+  assert.deepEqual(plain(calls.query), [{ active: true, lastFocusedWindow: true }]);
+  assert.deepEqual(plain(calls.sendMessage), [{ tabId: 13, payload }]);
+  assert.deepEqual(plain(result), { success: true, response: { from: 13 } });
+});
+
+test("background relay source contains no URL-filtered or arbitrary YouTube fallback", () => {
+  const source = read("background.js");
+  const relayBlock = source.slice(
+    source.indexOf('if (message.action === "relayToContent")'),
+    source.indexOf("async function getPlayerVideoDetails"),
+  );
+  assert.doesNotMatch(relayBlock, /tabs\.query\(\{\s*url:/);
+  assert.equal(
+    (relayBlock.match(/chrome\.tabs\.query\(/g) || []).length,
+    1,
+  );
+});
 
 function deferred() {
   let resolve;
