@@ -63,6 +63,11 @@ const VOCABULARY_MATCH_LIMITS = Object.freeze({
   maxTermLength: 1_000,
   maxTextLength: 12_000,
 });
+const TRANSCRIPT_SEARCH_LIMITS = Object.freeze({
+  maxQueryLength: 200,
+  maxTextLength: 12_000,
+  maxMatches: 1_000,
+});
 
 // --- Ask state ---
 // Messages intentionally remain in memory. Only generated suggestions are
@@ -3571,6 +3576,64 @@ function isLatinWordCharacter(character) {
 }
 
 /**
+ * Finds bounded, non-overlapping literal matches in one rendered Transcript
+ * segment. Normalization keeps source offsets while indexOf avoids treating
+ * user input as a regular expression.
+ */
+function findLiteralTranscriptMatches(text, query) {
+  const trimmedQuery = String(query || "").trim();
+  if (
+    !trimmedQuery ||
+    trimmedQuery.length > TRANSCRIPT_SEARCH_LIMITS.maxQueryLength
+  ) {
+    return [];
+  }
+
+  const normalizedText = buildNormalizedVocabularyText(
+    text,
+    TRANSCRIPT_SEARCH_LIMITS.maxTextLength,
+  );
+  const normalizedQuery = buildNormalizedVocabularyText(
+    trimmedQuery,
+    TRANSCRIPT_SEARCH_LIMITS.maxQueryLength,
+  ).text;
+  if (!normalizedText.text || !normalizedQuery) return [];
+
+  const matches = [];
+  let fromIndex = 0;
+  while (
+    fromIndex <= normalizedText.text.length - normalizedQuery.length &&
+    matches.length < TRANSCRIPT_SEARCH_LIMITS.maxMatches
+  ) {
+    const matchIndex = normalizedText.text.indexOf(normalizedQuery, fromIndex);
+    if (matchIndex < 0) break;
+    const normalizedEnd = matchIndex + normalizedQuery.length;
+    const start = normalizedText.starts[matchIndex];
+    const end = normalizedText.ends[normalizedEnd - 1];
+    if (Number.isInteger(start) && Number.isInteger(end) && end > start) {
+      matches.push({ start, end });
+    }
+    fromIndex = normalizedEnd;
+  }
+  return matches;
+}
+
+function clearTranscriptSearchHighlights(
+  root = document.getElementById("transcriptList"),
+) {
+  if (!root) return;
+  const ownerDocument = root.ownerDocument || document;
+  root
+    .querySelectorAll("mark.transcript-search-highlight")
+    .forEach((mark) => {
+      const textNode = ownerDocument.createTextNode(mark.textContent || "");
+      const parent = mark.parentNode;
+      mark.replaceWith(textNode);
+      parent?.normalize();
+    });
+}
+
+/**
  * Plans literal text matches without constructing a RegExp from saved input.
  * Longer terms claim overlaps first; all work is bounded by fixed limits.
  */
@@ -4692,6 +4755,8 @@ globalThis.__YTD_TRANSCRIPT_TESTING__ = {
   alignTranslatedSegmentBatch,
   renderSubtitleInlineMarkup,
   renderTranscriptSegmentContent,
+  findLiteralTranscriptMatches,
+  clearTranscriptSearchHighlights,
   getOverviewTranslationSegments,
   buildAudioTranscriptionConfirmation,
 };
