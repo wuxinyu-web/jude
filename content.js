@@ -229,6 +229,7 @@ function findDigestButtonHost() {
 
 function createDigestButton() {
   const digestButton = document.createElement("button");
+  let requiresPageReload = false;
   digestButton.id = "ytd-digest-button";
   digestButton.type = "button";
   digestButton.setAttribute("aria-label", "Open YouTube Digest");
@@ -280,6 +281,11 @@ function createDigestButton() {
     e.preventDefault();
     e.stopPropagation();
 
+    if (requiresPageReload) {
+      window.location.reload();
+      return;
+    }
+
     debugLog("[YouTube Digest] Digest button clicked");
 
     // Send message to background script to open side panel
@@ -290,6 +296,19 @@ function createDigestButton() {
       debugLog("[YouTube Digest] openSidePanel response:", result);
     } catch (err) {
       console.error("[YouTube Digest] Failed to open side panel:", err);
+      const errorMessage = String(err?.message || err);
+      if (/Extension context invalidated/i.test(errorMessage)) {
+        requiresPageReload = true;
+        digestButton.setAttribute(
+          "aria-label",
+          "Refresh YouTube to reconnect YouTube Digest",
+        );
+        digestButton.title = "The extension was updated. Refresh this page to reconnect.";
+        digestButton.innerHTML = `
+          <span class="ytd-digest-icon" style="font-size: 15px;">↻</span>
+          <span class="ytd-digest-label">Refresh page</span>
+        `;
+      }
     }
   });
 

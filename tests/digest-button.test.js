@@ -364,7 +364,10 @@ class FakeElement {
   }
 }
 
-function createHarness() {
+function createHarness({
+  reload = () => {},
+  sendMessage = async () => ({ success: true }),
+} = {}) {
   const actionRows = [];
   const fallbackRows = [];
   const elements = [];
@@ -407,7 +410,7 @@ function createHarness() {
     console,
     document,
     window: {
-      location: { pathname: "/watch" },
+      location: { pathname: "/watch", reload },
       addEventListener(type, listener) {
         windowListeners[type] = listener;
       },
@@ -421,9 +424,7 @@ function createHarness() {
     chrome: {
       runtime: {
         onMessage: { addListener() {} },
-        async sendMessage() {
-          return { success: true };
-        },
+        sendMessage,
       },
     },
     MutationObserver: class {
@@ -506,6 +507,37 @@ test("Digest button skips a hidden responsive toolbar", () => {
   assert.equal(visibleGroup.children[1], nativeButton);
   assert.match(visibleGroup.children[0].style.cssText, /flex:\s*0 0 auto/);
   assert.match(visibleGroup.children[0].style.cssText, /width:\s*max-content/);
+});
+
+test("invalidated extension context turns Digest into an explicit page refresh", async () => {
+  let reloadCount = 0;
+  let sendCount = 0;
+  const harness = createHarness({
+    reload() {
+      reloadCount += 1;
+    },
+    async sendMessage() {
+      sendCount += 1;
+      throw new Error("Extension context invalidated.");
+    },
+  });
+  const { row, buttonGroup } = createActionRow({ width: 500, height: 36 });
+  harness.actionRows.push(row);
+  harness.context.injectDigestButton();
+  const button = buttonGroup.children[0];
+  const event = { preventDefault() {}, stopPropagation() {} };
+
+  await button.listeners.click(event);
+
+  assert.equal(sendCount, 1);
+  assert.equal(reloadCount, 0);
+  assert.equal(button["aria-label"], "Refresh YouTube to reconnect YouTube Digest");
+  assert.match(button.innerHTML, /Refresh page/);
+
+  await button.listeners.click(event);
+
+  assert.equal(sendCount, 1, "the stale runtime must not be called a second time");
+  assert.equal(reloadCount, 1);
 });
 
 test("Digest button replaces stale instances and removes duplicates", () => {
