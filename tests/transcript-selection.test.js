@@ -590,7 +590,7 @@ test("all timestamped transcript row clicks use the selection-aware seek helper"
   );
   assert.match(
     source,
-    /function seekFromTranscriptEntryClick\(event, seconds\)[\s\S]*?if \(hasNonCollapsedTextSelection\(\)\) \{[\s\S]*?event\.preventDefault\(\);[\s\S]*?event\.stopPropagation\(\);[\s\S]*?return;[\s\S]*?\}[\s\S]*?seekTo\(seconds\);/,
+    /function seekFromTranscriptEntryClick\(event, seconds\)[\s\S]*?if \(hasNonCollapsedTextSelection\(\)\) \{[\s\S]*?event\.preventDefault\(\);[\s\S]*?event\.stopPropagation\(\);[\s\S]*?return;[\s\S]*?\}[\s\S]*?seekTo\(seconds, \{ play: true \}\);/,
   );
 
   const guardedRowHandlers = source.match(
@@ -816,4 +816,20 @@ test('clicked row scrolls immediately before the player seek finishes', async ()
   const promise=sandbox.seekFromTranscriptEntryClick({currentTarget:row},125);
   assert.equal(calls.length,1);assert.equal(calls[0][0],row);assert.equal(calls[0][1],'instant');
   finish(true);await promise;assert.equal(calls.length,2);assert.equal(sandbox.autoScrollEnabled,true);
+});
+
+test('Bilibili subtitle seeks start playback from paused or playing state', async () => {
+  const script=fs.readFileSync(path.resolve(__dirname,'../lib/bilibili-content.js'),'utf8');
+  for(const paused of [true,false]){
+    let listener,plays=0,response;
+    const video={paused,currentTime:0,play:async()=>{plays++;video.paused=false;}};
+    const sandbox={chrome:{runtime:{onMessage:{addListener:f=>listener=f}}},
+      document:{querySelector:()=>video,getElementById:()=>({}),addEventListener(){}},
+      YTD_PLATFORM:{videoIdFromUrl:()=>null},location:{href:''},setInterval(){},setTimeout(){},
+      MutationObserver:class{observe(){}},window:{addEventListener(){}}};
+    vm.runInNewContext(script,sandbox);
+    assert.equal(listener({action:'seekTo',seconds:134,play:true},{},r=>response=r),true);
+    await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(video.currentTime,134);assert.equal(plays,1);assert.equal(video.paused,false);assert.equal(response.success,true);
+  }
 });

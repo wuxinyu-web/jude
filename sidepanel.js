@@ -401,7 +401,7 @@ function setupTranscriptViewStateListeners() {
   const contentArea = document.getElementById("contentArea");
   contentArea?.removeEventListener("scroll", onContentAreaScroll);
   contentArea?.addEventListener("scroll", onContentAreaScroll);
-  for (const event of ["wheel", "touchmove", "keydown"]) {
+  for (const event of ["wheel", "touchmove", "keydown", "pointerdown"]) {
     contentArea?.removeEventListener(event, onTranscriptScrollIntent);
     contentArea?.addEventListener(event, onTranscriptScrollIntent, { passive: true });
   }
@@ -1319,7 +1319,7 @@ async function seekFromTranscriptEntryClick(event, seconds) {
   if (clickedEntry?.matches?.(".transcript-entry")) scrollTranscriptEntry(clickedEntry, "instant");
   const snapshot = sentenceFollowSnapshot();
   const request = ++transcriptSeekRevision;
-  const success = await seekTo(seconds);
+  const success = await seekTo(seconds, { play: true });
   if (!success || request !== transcriptSeekRevision ||
       snapshot.videoId !== currentVideoId || snapshot.generation !== digestGeneration ||
       snapshot.revision !== manualTranscriptScrollRevision || !transcriptTabIsActive()) return;
@@ -1786,7 +1786,7 @@ function isCurrentAnalysisRequest(snapshot) {
 // TIMESTAMP / SEEK
 // ============================================================
 
-async function seekTo(seconds) {
+async function seekTo(seconds, { play = false } = {}) {
   debugLog("[YouTube Digest Panel] seekTo called with:", seconds);
   if (seconds === undefined || seconds === null) {
     debugLog("[YouTube Digest Panel] seekTo aborted - no seconds value");
@@ -1796,6 +1796,7 @@ async function seekTo(seconds) {
   const payload = {
     action: "seekTo",
     seconds: Number(seconds),
+    play,
   };
 
   try {
@@ -3741,6 +3742,10 @@ function highlightActiveEntry(currentSeconds) {
  */
 function onTranscriptScrollIntent(event) {
   if (!transcriptTabIsActive()) return;
+  if (event.type === "pointerdown") {
+    const area = document.getElementById("contentArea"), rect = area.getBoundingClientRect();
+    if (event.target !== area || event.clientX < rect.right - 16) return;
+  }
   if (event.type === "keydown" && (!['ArrowUp','ArrowDown','PageUp','PageDown','Home','End',' '].includes(event.key) || /INPUT|TEXTAREA|SELECT|BUTTON/.test(event.target?.tagName || ''))) return;
   manualTranscriptScrollRevision += 1;
   autoScrollEnabled = false;
@@ -3771,13 +3776,8 @@ function onContentAreaScroll() {
   // (smooth scroll animations can last longer than a simple boolean flag)
   if (Date.now() - lastAutoScrollTime < 1000) return;
 
-  manualTranscriptScrollRevision += 1;
-  // User scrolled manually — disable auto-scroll and show the button
-  if (autoScrollEnabled && autoScrollInterval) {
-    autoScrollEnabled = false;
-    document.getElementById("followPlaybackBtn").style.display = "block";
-  }
-
+  // Only explicit wheel/touch/key/scrollbar input pauses following. Layout
+  // changes and browser scroll anchoring are not a request to stop following.
   captureTranscriptViewPosition();
 }
 

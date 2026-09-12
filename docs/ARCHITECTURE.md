@@ -110,3 +110,5 @@ The first English snapshot is buffered until 20 subtitle entries are available; 
 Sentence-save follow uses a video/generation/manual-scroll revision snapshot. Explicit wheel, touch and keyboard scrolling cancels pending recentering, including during player-position requests. Native selection temporarily suppresses automatic scrolling.
 
 Immersive row clicks position the clicked DOM row immediately, before the seek response. The English text rectangle is aligned beneath the measured sticky toolbar with a 4px inset; post-seek following retains generation and manual-scroll guards.
+
+Transcript row seeks request play=true; Bilibili acknowledges after play() resolves and reports failure if rejected. Scroll events only save reading position; explicit wheel/touch/keyboard/scrollbar input disables follow so translation reflow cannot stop playback tracking.
