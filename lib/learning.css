@@ -107,3 +107,6 @@ html.immersive .error-btn{margin-top:0;padding:8px 18px;color:#172012}
 .learning-word-definition{min-height:0;overflow:auto;overscroll-behavior:contain}
 
 .asr-chunks{display:flex;align-items:center;flex-wrap:wrap;gap:6px;width:100%}.asr-chunks[hidden]{display:none}.asr-chunks select{min-width:0;max-width:100%;flex:1;padding:5px;border:1px solid #64735e;border-radius:6px;background:inherit;color:inherit;font:inherit}.asr-chunks option{background:#202622;color:#fff}html.immersive .asr-chunks{display:none!important}
+
+/* Leave enough trailing space to top-align even the final playing caption. */
+html.immersive #transcriptList{padding-bottom:calc(100vh - 40px)}

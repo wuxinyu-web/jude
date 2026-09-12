@@ -3656,7 +3656,14 @@ function scrollToActiveEntry(behavior = "smooth") {
   if (!activeEntry) return false;
 
   lastAutoScrollTime = Date.now();
-  activeEntry.scrollIntoView({ behavior, block: "center" });
+  if (document.documentElement.classList.contains("immersive")) {
+    const area = document.getElementById("contentArea");
+    const toolbar = document.querySelector("#transcriptSection .sticky-control-row") || document.querySelector(".sticky-control-row");
+    const top = area.scrollTop + activeEntry.getBoundingClientRect().top - area.getBoundingClientRect().top - (toolbar?.getBoundingClientRect().height || 0);
+    area.scrollTo({ top: Math.max(0, top), behavior });
+  } else {
+    activeEntry.scrollIntoView({ behavior, block: "center" });
+  }
   return true;
 }
 
@@ -3700,8 +3707,7 @@ function highlightActiveEntry(currentSeconds) {
 
   // Only scroll if auto-scroll is enabled
   if (autoScrollEnabled && !hasNonCollapsedTextSelection()) {
-    lastAutoScrollTime = Date.now();
-    activeEntry.scrollIntoView({ behavior: "smooth", block: "center" });
+    scrollToActiveEntry(document.documentElement.classList.contains("immersive") ? "instant" : "smooth");
   }
 }
 
