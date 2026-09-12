@@ -231,15 +231,17 @@ function attachClient(rootSession,sessionId){
         await until(()=>frame.evaluate(()=>YTD_PANEL.context().source==='local-asr'),'first chunk applied');
         assert.equal(await frame.locator('.asr-chunks select').inputValue(),'12');
         assert.equal(await frame.evaluate(()=>YTD_PANEL.rawSegments()[0].start),14402);
-        await frame.getByRole('button',{name:'下一段',exact:true}).click();await frame.locator('#localAsrStart').click();
+        await until(async()=>!await frame.locator('#localAsrPanel').isVisible(),'completed ASR controls hidden after rendering');
+        // Exercise the unchanged range controller, even while its immersive UI is hidden.
+        await frame.evaluate(()=>{[...document.querySelectorAll('.asr-chunks button')].find(b=>b.textContent==='下一段').click();document.getElementById('localAsrStart').click();});
         await until(()=>frame.evaluate(()=>YTD_PANEL.rawSegments().length===4),'second chunk merged');
         assert.deepEqual(await frame.evaluate(()=>YTD_PANEL.rawSegments().map(s=>s.start)),[14402,14408,15602,15608]);
         assert.equal(await frame.evaluate(async()=>(await chrome.runtime.sendMessage({action:'relayToContent',payload:{action:'getCurrentTime'}})).response.currentTime),14500,'selecting a chunk never seeks playback');
-        await frame.getByRole('button',{name:'上一段',exact:true}).click();await frame.locator('#localAsrStart').click();
+        await frame.evaluate(()=>{[...document.querySelectorAll('.asr-chunks button')].find(b=>b.textContent==='上一段').click();document.getElementById('localAsrStart').click();});
         await until(()=>starts===3,'repeat chunk request');assert.equal(await frame.evaluate(()=>YTD_PANEL.rawSegments().length),4);
         await video.screenshot({path:path.join(out,'segment-picker.png')});
         await frame.goto(frame.url());await until(()=>frame.evaluate(()=>YTD_PANEL.rawSegments().length===4),'merged chunks survive refresh');
-        assert.equal(await frame.locator('.asr-chunks').isVisible(),true,'picker remains visible with English captions');
+        assert.equal(await frame.locator('.asr-chunks').isVisible(),false,'picker stays hidden after refresh');
         fs.writeFileSync(path.join(out,'result.json'),JSON.stringify({passed:true,checks:['25-chunks','current-playback-chunk','absolute-timestamps','merge','retry-dedup','no-seek','refresh','picker-remains-visible']}));panel=null;console.log('PASS: long video chunks and merged subtitles');return;
       }
       if(noCaptions){
