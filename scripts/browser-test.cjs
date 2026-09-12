@@ -153,21 +153,24 @@ function attachClient(rootSession,sessionId){
         await panel.click('#enterImmersive');let frame;
         await until(async()=>{frame=video.frames().find(f=>f.url().includes('immersive=1'));return frame&&(await frame.locator('#localAsrStatus').innerText()).includes('暂不可用');},'automatic ASR failure visible');
         assert.equal(starts,1);await sleep(2500);assert.equal(starts,1,'failure does not automatically loop');
-        await frame.getByRole('button',{name:'转写英文原声',exact:true}).click();
+        await frame.locator('#contentArea').hover({position:{x:10,y:230}});await video.mouse.wheel(0,500);await sleep(500);
+        assert.equal(await frame.locator('#localAsrStatus').isVisible(),true);const statusRect=await frame.locator('#localAsrStatus').evaluate(e=>e.getBoundingClientRect().toJSON());assert.ok(statusRect.top>=0&&statusRect.bottom<300,'ASR status remains on screen after scrolling');
+        await frame.locator('[data-transcript-mode=zh]').click();assert.equal(await frame.locator('[data-transcript-mode=zh]').getAttribute('aria-pressed'),'true');
+        await frame.locator('[data-transcript-mode=bilingual]').click();assert.equal(await frame.locator('[data-transcript-mode=bilingual]').getAttribute('aria-pressed'),'true');
         await until(async()=>await frame.getByRole('button',{name:'取消转写',exact:true}).isVisible(),'inline cancel');assert.equal(starts,2);
         await frame.getByRole('button',{name:'取消转写',exact:true}).click();await until(async()=>(await frame.locator('#localAsrStatus').innerText()).includes('已取消'),'inline cancelled');
         await sleep(2200);assert.equal(starts,2,'cancel does not restart');
-        complete=true;await frame.getByRole('button',{name:'转写英文原声',exact:true}).click();
+        complete=true;await frame.locator('[data-transcript-mode=bilingual]').click();
         await until(async()=>(await frame.locator('#transcriptList').innerText()).includes('An object'),'English applied without leaving immersion');
         assert.ok((await frame.locator('.transcript-translation').first().innerText()).includes('静止'));assert.equal(starts,3);assert.equal(await worker.evaluate(()=>__fixtureCalls.length),0);
         await video.screenshot({path:path.join(out,'auto-asr-bilingual.png')});
         assert.equal(starts,3);
-        fs.writeFileSync(path.join(out,'result.json'),JSON.stringify({passed:true,checks:['automatic-start','failure-visible','no-retry-loop','inline-cancel','inline-retry','auto-bilingual','native-Chinese-retained','no-cloud-translation','cached-reentry']}));panel=null;console.log('PASS: automatic immersive ASR, failure, cancellation and bilingual completion');return;
+        fs.writeFileSync(path.join(out,'result.json'),JSON.stringify({passed:true,checks:['automatic-start','failure-visible','no-retry-loop','inline-cancel','inline-retry','auto-bilingual','native-Chinese-retained','no-cloud-translation','sticky-progress-after-scroll','Chinese-button-selection','bilingual-click-retry']}));panel=null;console.log('PASS: automatic immersive ASR, failure, cancellation and bilingual completion');return;
       }
       await panel.click('[data-transcript-mode="bilingual"]');
       assert.equal(await worker.evaluate(()=>__fixtureCalls.length),0,'Chinese source never translates Chinese to Chinese');
       assert.ok(await panel.evaluate(()=>document.getElementById('localAsrStatus').textContent.includes('转写英文原声')));
-      await panel.click('#localAsrStart');await until(()=>panel.evaluate(()=>!document.getElementById('localAsrCancel').hidden),'cancel available');
+      await until(()=>panel.evaluate(()=>!document.getElementById('localAsrCancel').hidden),'bilingual click starts transcription');
       await panel.click('#localAsrCancel');await until(()=>panel.evaluate(()=>document.getElementById('localAsrStatus').textContent.includes('已取消')),'cancelled');
       assert.ok(await panel.evaluate(()=>document.querySelector('.transcript-text').textContent.includes('静止')),'cancel preserves Chinese');
       complete=true;await panel.click('#localAsrStart');

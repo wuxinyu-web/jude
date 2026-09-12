@@ -44,6 +44,7 @@ let closeActiveExplanationModal = null;
 // The public transcript control intentionally supports only the original
 // subtitles, Chinese, and an aligned source + Chinese view.
 let currentTranscriptMode = /[?&]immersive=1(?:&|$)/.test(globalThis.location?.search||"") ? "bilingual" : "original";
+let pendingOriginalAudioMode = currentTranscriptMode === "bilingual" ? "bilingual" : null;
 let currentOverviewMode = "original";
 let translationGeneration = 0; // Invalidates responses from older UI modes/videos.
 let translationWorkCount = 0;
@@ -3876,10 +3877,15 @@ function setTranscriptModeButtons(mode) {
 async function handleTranscriptModeChange(mode) {
   if (!["original", "zh", "bilingual"].includes(mode)) return;
   if(mode !== "original" && /^(ai-)?zh(?:-|$)/i.test(currentTranscriptLanguage||"")) {
-    currentTranscriptMode="original";setTranscriptModeButtons("original");renderTranscript();
-    globalThis.YTD_ASR_UI?.notice("当前只有中文字幕。请先点击「转写英文原声」，完成后才能显示英文与中文对照。");return;
+    currentTranscriptMode="original";pendingOriginalAudioMode=mode;renderTranscript();setTranscriptModeButtons(mode);
+    if(mode==='bilingual'){
+      globalThis.YTD_ASR_UI?.notice('正在准备英文原声，完成后显示双语…');
+      await globalThis.YTD_ASR_UI?.ensureAutomatic({retry:true});
+    }else globalThis.YTD_ASR_UI?.refresh();
+    return;
   }
-  if (mode === currentTranscriptMode) return;
+  pendingOriginalAudioMode=null;
+  if (mode === currentTranscriptMode) {setTranscriptModeButtons(mode);return;}
 
   currentTranscriptMode = mode;
   translationGeneration += 1;
@@ -4118,7 +4124,7 @@ function retryTranslationSegment(index, generation) {
  */
 async function translateTranscript() {
   setTranscriptModeButtons(currentTranscriptMode);
-  if(/^(ai-)?zh(?:-|$)/i.test(currentTranscriptLanguage||"")) {currentTranscriptMode="original";setTranscriptModeButtons("original");renderTranscript();return;}
+  if(/^(ai-)?zh(?:-|$)/i.test(currentTranscriptLanguage||"")) {currentTranscriptMode="original";renderTranscript();setTranscriptModeButtons(pendingOriginalAudioMode||"original");return;}
   if(currentTranscriptSource==="local-asr" && /^(ai-)?zh(?:-|$)/i.test(currentNativeTranscriptBackup?.language||"")){
     translationGeneration++;transcriptScrollObserver?.disconnect();transcriptScrollObserver=null;
     const groups=getActiveTranscriptSegments();

@@ -76,3 +76,6 @@ Immersive Chinese-only detection calls local-asr ensureAutomatic once per video.
 ## 1.10.0 shared transcript immersion
 
 Immersion now shows the existing transcript pane, with its shared rendering, bilingual translation queue, scroll tracking, hover/selection capture and collection messages. The parallel single-cue renderer/queue has been removed. It adds no timers. The narrow YTD_PANEL bridge exposes transcript mode switching after ASR application. Only the sidebar exposes other panels. Legacy vertical preferences normalize to immersive; the dock retains the player DOM and resize/fullscreen handling. Sentence-row actions in immersion save the original segment text only, while sidebar row behavior remains compatible.
+
+
+1.10.1 tracks the requested caption mode while Chinese-only audio is being prepared. A bilingual click invokes ensureAutomatic({retry:true}), bypassing only the prior-attempt marker while retaining running-job reuse. The existing ASR panel moves inside the sticky transcript controls in immersion, preserving all handlers and status updates. Browser regression covers scrolled failure status, language selection, explicit retry, cancellation and automatic completion.
