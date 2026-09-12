@@ -110,15 +110,44 @@ function attachClient(rootSession,sessionId){
       await frame.locator('[data-transcript-mode=original]').click();assert.equal(await frame.locator('.transcript-original').count(),0);await frame.locator('[data-transcript-mode=bilingual]').click();
       await frame.locator('#contentArea').evaluate(e=>e.scrollTop=0);await sleep(600);await video.screenshot({path:path.join(out,'before-hover.png')});
       const point=await frame.locator('.transcript-original').first().evaluate(e=>{const w=document.createTreeWalker(e,NodeFilter.SHOW_TEXT);const n=w.nextNode();const r=document.createRange();r.setStart(n,0);r.setEnd(n,Math.min(8,n.length));const b=r.getBoundingClientRect();return {x:b.x+b.width/2,y:b.y+b.height/2};});const offset=await video.locator('#ytd-layout-dock iframe').boundingBox();await video.mouse.move(offset.x+point.x,offset.y+point.y);
-      await until(async()=>(await frame.locator('.learning-float').innerText()).includes('持续性'),'existing hover lookup');await frame.getByRole('button',{name:'收藏单词',exact:true}).click();await frame.locator('.learning-float').getByRole('button',{name:'关闭',exact:true}).click();
+      assert.equal(await frame.evaluate(()=>[...CSS.highlights.get('ytd-hover-word')][0].toString()),'Consistency','word paints before lookup completes');
+      assert.equal(await frame.locator('.learning-float').count(),0,'lookup remains delayed');
+      await video.screenshot({path:path.join(out,'word-hover-highlight.png')});
+      await until(async()=>(await frame.locator('.learning-float').innerText()).includes('持续性'),'existing hover lookup');
+      const clickFloat=async label=>{
+        const box=await frame.getByRole('button',{name:label,exact:true}).evaluate(e=>{const r=e.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};});
+        const host=await video.locator('#ytd-layout-dock iframe').boundingBox();
+        await video.mouse.click(host.x+box.x,host.y+box.y);
+      };
+      await clickFloat('收藏单词');
+      await until(()=>worker.evaluate(async()=>((await chrome.storage.local.get('ytd_vocabulary')).ytd_vocabulary||[]).length===1),'hover word saved');
+      await clickFloat('关闭');
+      await video.mouse.move(offset.x+offset.width/2,offset.y+15);
+      await until(async()=>!(await frame.evaluate(()=>CSS.highlights.has('ytd-hover-word'))),'leaving word clears transient highlight');
+      const selected=await frame.evaluate(()=>{
+        const roots=[...document.querySelectorAll('.transcript-original')];
+        const first=document.createTreeWalker(roots[0],NodeFilter.SHOW_TEXT).nextNode();
+        const walker=document.createTreeWalker(roots[1],NodeFilter.SHOW_TEXT);let last,n;while(n=walker.nextNode())last=n;
+        const range=document.createRange();range.setStart(first,0);range.setEnd(last,last.length);
+        const selection=getSelection();selection.removeAllRanges();selection.addRange(range);
+        document.dispatchEvent(new PointerEvent('pointerup',{bubbles:true}));
+        return roots[0].textContent+'\n'+roots[1].textContent;
+      });
+      await video.screenshot({path:path.join(out,'sentence-selection.png')});
+      await clickFloat('收藏句子');
+      await until(()=>worker.evaluate(async()=>((await chrome.storage.local.get('ytd_sentences')).ytd_sentences||[]).length===1),'cross-line selection saved');
+      const savedSelection=await worker.evaluate(async()=>(await chrome.storage.local.get('ytd_sentences')).ytd_sentences[0]);
+      assert.equal(savedSelection.term,selected);assert.ok(!savedSelection.term.includes('中文测试译文'));
+      await frame.locator('.learning-float').getByRole('button',{name:'关闭',exact:true}).click();
+      await frame.evaluate(()=>getSelection().removeAllRanges());
       await frame.locator('.transcript-entry').first().hover();await frame.getByRole('button',{name:'收藏这句英文字幕',exact:true}).first().click();
-      await until(()=>worker.evaluate(async()=>((await chrome.storage.local.get('ytd_sentences')).ytd_sentences||[]).length===1),'sentence saved');
+      await until(()=>worker.evaluate(async()=>((await chrome.storage.local.get('ytd_sentences')).ytd_sentences||[]).length===2),'sentence saved');
       const entries=await worker.evaluate(async()=>await chrome.storage.local.get(['ytd_sentences','ytd_vocabulary']));assert.equal(entries.ytd_vocabulary.length,1);assert.ok(!entries.ytd_sentences[0].term.includes('中文测试译文'));
       await frame.locator('#contentArea').hover({position:{x:10,y:200}});await sleep(100);await video.mouse.wheel(0,500);await sleep(800);await video.screenshot({path:path.join(out,'after-wheel.png')});await until(()=>frame.locator('#contentArea').evaluate(e=>e.scrollTop>100),'wheel browses subtitles');
       await setTime(22);await frame.locator('#returnToPlaybackBtn').click();await until(async()=>await frame.locator('.active-playback').getAttribute('data-seconds')==='22','return to playing sentence');
       await video.getByRole('button',{name:'全屏',exact:true}).click();await until(()=>video.evaluate(()=>document.fullscreenElement===document.documentElement),'whole workspace fullscreen');await video.screenshot({path:path.join(out,'immersive-fullscreen.png')});await video.getByRole('button',{name:'全屏',exact:true}).click();
       await frame.locator('#returnToSidebar').click();await until(async()=>!await video.locator('#ytd-layout-dock').count(),'arrow returns to sidebar');assert.equal(await worker.evaluate(async()=>(await chrome.storage.local.get('ytd_layout_preferences')).ytd_layout_preferences.mode),'horizontal');
-      fs.writeFileSync(path.join(out,'result.json'),JSON.stringify({passed:true,checks:['two-layouts','transcript-only','default-bilingual','language-switch','hover-word-save','original-sentence-save','wheel-scroll','playback-return','height','fullscreen','sidebar-return']},null,2));panel=null;console.log('PASS: transcript-only immersion, hover collection, scroll and sidebar return');return;
+      fs.writeFileSync(path.join(out,'result.json'),JSON.stringify({passed:true,checks:['two-layouts','transcript-only','default-bilingual','language-switch','immediate-word-highlight','hover-word-save','cross-line-selection-save','original-sentence-save','wheel-scroll','playback-return','height','fullscreen','sidebar-return']},null,2));panel=null;console.log('PASS: transcript-only immersion, hover collection, scroll and sidebar return');return;
     }
 
     if(process.env.YTD_TEST_STUDY==='1') {
@@ -309,7 +338,7 @@ function attachClient(rootSession,sessionId){
     await panel.evaluate(()=>{
       const roots=document.querySelectorAll('.transcript-original'),range=document.createRange();range.setStart(roots[0],0);range.setEnd(roots[1],roots[1].childNodes.length);const s=getSelection();s.removeAllRanges();s.addRange(range);document.dispatchEvent(new PointerEvent('pointerup',{bubbles:true}));
     });
-    await panel.click('.learning-float button','收藏长难句');
+    await panel.click('.learning-float button','收藏句子');
     await until(()=>worker.evaluate(async()=>((await chrome.storage.local.get('ytd_sentences')).ytd_sentences?.[0]?.analysisStatus==='ready')),'sentence analysis');
     const entry=await worker.evaluate(async()=>(await chrome.storage.local.get('ytd_sentences')).ytd_sentences[0]);assert.match(entry.term,/Consistency/);assert.match(entry.term,/The book/);assert.doesNotMatch(entry.term,/Explain|Save|解释|收藏|0:00|中文测试/);assert.equal(entry.timestampSeconds,0);
     await panel.click('.learning-float button','关闭');await panel.evaluate(()=>getSelection().removeAllRanges());
