@@ -112,11 +112,12 @@
                 ></span>
               </div>
               <div class="transcript-actions">
-                <button class="enhance-btn" id="followPlaybackToggle" type="button" aria-pressed="true" title="字幕自动滚动到当前播放位置；手动滚动后点击可恢复">跟随播放：开</button>
+                <button class="enhance-btn" id="returnToPlaybackBtn" type="button" title="定位到当前视频时间对应的字幕，暂停时也可使用">回到播放位置</button>
                 <button class="enhance-btn" id="copyTranscriptBtn">复制</button>
                 <button class="enhance-btn" id="exportTranscriptBtn">导出</button>
               </div>
             </div>
+            <p id="playbackPositionStatus" role="status" aria-live="polite"></p>
             <div class="transcript-search" role="search">
               <label class="sr-only" for="transcriptSearchInput">搜索字幕</label>
               <div class="transcript-search-field">
@@ -300,7 +301,7 @@
       class="follow-playback-btn"
       id="followPlaybackBtn"
       style="display: none"
-    >跟随播放</button>
+    >回到播放位置</button>
 
     <script src="lib/platform.js"></script>
     <script src="settings.js"></script>

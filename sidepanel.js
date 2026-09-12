@@ -730,22 +730,9 @@ function setupEventListeners() {
     }
   });
 
-  // Follow playback button — re-enables auto-scroll after user scrolled away
-  document
-    .getElementById("followPlaybackBtn")
-    ?.addEventListener("click", () => {
-      autoScrollEnabled = true;
-      document.getElementById("followPlaybackBtn").style.display = "none";
-      // Jump straight back to the line currently being spoken. We scroll
-      // directly (not via playbackTrackingTick) because the tick skips
-      // entries that are already highlighted — and the current line almost
-      // always IS highlighted, which made this button appear to do nothing.
-      if (!scrollToActiveEntry()) {
-        playbackTrackingTick(); // No highlight yet — let a tick establish one
-      }
-    });
-
-  document.getElementById("followPlaybackToggle")?.addEventListener("click",toggleFollowPlayback);
+  // Both entry points perform the same action, never toggle following off.
+  document.getElementById("followPlaybackBtn")?.addEventListener("click", returnToPlaybackPosition);
+  document.getElementById("returnToPlaybackBtn")?.addEventListener("click", returnToPlaybackPosition);
 
   // Notes filter buttons
   document.getElementById("notesFilterThis")?.addEventListener("click", () => {
@@ -3502,15 +3489,20 @@ async function deleteNote(noteId) {
  * to the matching transcript entry.
  */
 
-function updateFollowPlaybackButton(){
-  const button=document.getElementById("followPlaybackToggle");if(!button)return;
-  button.textContent=autoScrollEnabled?"跟随播放：开":"跟随播放：关";
-  button.setAttribute("aria-pressed",String(autoScrollEnabled));
-}
-async function toggleFollowPlayback(){
-  autoScrollEnabled=!autoScrollEnabled;
-  updateFollowPlaybackButton();
-  if(autoScrollEnabled){await playbackTrackingTick();scrollToActiveEntry();}
+async function returnToPlaybackPosition() {
+  const button = document.getElementById("returnToPlaybackBtn");
+  const status = document.getElementById("playbackPositionStatus");
+  const videoId = currentVideoId, generation = digestGeneration;
+  if (status) status.textContent = "";
+  if (button) button.disabled = true;
+  try {
+    const positioned = await playbackTrackingTick({ returnToPosition: true });
+    if (!positioned && videoId === currentVideoId && generation === digestGeneration && status) {
+      status.textContent = "未能定位字幕，请刷新视频页面后重试。";
+    }
+  } finally {
+    if (button) button.disabled = false;
+  }
 }
 
 function startPlaybackTracking() {
@@ -3562,23 +3554,34 @@ function stopPlaybackTracking() {
  * One tick of the playback tracker. Gets current video time from the
  * YouTube tab and highlights + scrolls to the matching transcript entry.
  */
-async function playbackTrackingTick() {
+async function playbackTrackingTick({ returnToPosition = false } = {}) {
   const snapshotVideoId=currentVideoId, snapshotGeneration=digestGeneration;
-  updateFollowPlaybackButton();
+  let timeout;
   try {
-    const result = await chrome.runtime.sendMessage({
+    const result = await Promise.race([chrome.runtime.sendMessage({
       action: "relayToContent",
       payload: { action: "getCurrentTime" },
-    });
+    }), new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error("播放位置读取超时")), 5000); })]);
 
-    if (!result.success || !result.response) return;
+    if (!result.success || !result.response || result.response.hasVideo === false) return false;
 
     if(snapshotVideoId!==currentVideoId || snapshotGeneration!==digestGeneration)return;
     if(result.response.videoId && result.response.videoId!==currentVideoId)return;
-    const currentTime = result.response.currentTime || 0;
+    const currentTime = result.response.currentTime;
+    if (!Number.isFinite(currentTime) || currentTime < 0) return false;
+    if (returnToPosition) autoScrollEnabled = true;
     highlightActiveEntry(currentTime);
+    if (returnToPosition) {
+      document.getElementById("followPlaybackBtn").style.display = "none";
+      // Always recenter, even when paused on the already highlighted row.
+      return scrollToActiveEntry("instant");
+    }
+    return true;
   } catch (error) {
-    // Silently ignore — YouTube tab might be closed or navigated away
+    // Polling stays quiet; the explicit action reports a retryable failure.
+    return false;
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
@@ -3589,14 +3592,14 @@ async function playbackTrackingTick() {
  * events from our own smooth animation aren't mistaken for the user
  * scrolling away (which would re-disable auto-scroll immediately).
  */
-function scrollToActiveEntry() {
+function scrollToActiveEntry(behavior = "smooth") {
   const activeEntry = document.querySelector(
     "#transcriptList .transcript-entry.active-playback",
   );
   if (!activeEntry) return false;
 
   lastAutoScrollTime = Date.now();
-  activeEntry.scrollIntoView({ behavior: "smooth", block: "center" });
+  activeEntry.scrollIntoView({ behavior, block: "center" });
   return true;
 }
 
@@ -3614,12 +3617,12 @@ function highlightActiveEntry(currentSeconds) {
   if (entries.length === 0) return;
 
   // Find the entry whose time range contains the current playback time
-  let activeEntry = null;
+  let activeEntry = currentSeconds < Number(entries[0].dataset.seconds) ? entries[0] : null;
   entries.forEach((entry, index) => {
-    const entrySeconds = parseInt(entry.dataset.seconds);
+    const entrySeconds = Number(entry.dataset.seconds);
     const nextEntry = entries[index + 1];
     const nextSeconds = nextEntry
-      ? parseInt(nextEntry.dataset.seconds)
+      ? Number(nextEntry.dataset.seconds)
       : Infinity;
 
     if (currentSeconds >= entrySeconds && currentSeconds < nextSeconds) {
@@ -3662,7 +3665,6 @@ function onContentAreaScroll() {
     document.getElementById("followPlaybackBtn").style.display = "block";
   }
 
-  updateFollowPlaybackButton();
   captureTranscriptViewPosition();
 }
 

@@ -1,3 +1,5 @@
+> 1.6.1：字幕工具栏改为「回到播放位置」，每次点击读取当前视频时间并定位，暂停时也可用；定位失败会提示刷新视频页面。
+
 ## 1.6.0: Local original-audio ASR
 
 Bilibili now offers explicit local Whisper transcription of English audio. Chinese source captions are never back-translated and presented as original dialogue. A paired Apple Silicon companion service is required; see [local-asr/README.md](local-asr/README.md). English ASR retains original Chinese captions for time-aligned comparison and can be reverted. Audio stays on the Mac; recognition can still make mistakes.

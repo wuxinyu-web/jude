@@ -144,6 +144,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({
       videoId: globalThis.YTD_PLATFORM?.videoIdFromUrl(location.href),
       currentTime: video ? video.currentTime : 0,
+      hasVideo: Boolean(video),
       paused: video ? video.paused : true,
     });
     return false;

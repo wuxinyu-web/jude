@@ -55,9 +55,10 @@ function attachClient(rootSession,sessionId){
         if(String(url).startsWith('https://'))throw new Error('LIVE PROVIDER DISABLED IN FIXTURE TEST');return original(url,options);
       };
     },{bili,fixtureId,asr});
-    for(const p of context.pages())if(p.url().includes('options.html'))await p.close();
     await context.route(bili?'https://www.bilibili.com/**':'https://www.youtube.com/**',route=>route.fulfill({contentType:'text/html',body:`<!doctype html><html><head><meta charset="UTF-8"><title>English practice fixture</title><style>video{width:600px;height:300px;background:#ddd}ytd-watch-metadata{display:block}</style></head><body><h1 class="video-title">英语学习测试视频</h1><div class="video-toolbar-left"></div><div class="recommend-list-v1">推荐</div><div id="movie_player" class="html5-video-player"><video muted></video></div><ytd-watch-metadata><div id="actions-inner" style="width:400px;height:40px"><div id="top-level-buttons-computed" style="width:400px;height:40px">Share</div></div></ytd-watch-metadata><div id="comments">Comments</div><ytd-watch-next-secondary-results-renderer>Recommendations</ytd-watch-next-secondary-results-renderer></body></html>`}));
-    const video=await context.newPage();await video.goto(bili?'https://www.bilibili.com/video/BV1xx411c7mD/?p=2':'https://www.youtube.com/watch?v=abcDEF12345');
+    const video=await context.newPage();
+    for(const p of context.pages())if(p.url().includes('options.html'))await p.close();
+    await video.goto(bili?'https://www.bilibili.com/video/BV1xx411c7mD/?p=2':'https://www.youtube.com/watch?v=abcDEF12345');
     await video.locator('#ytd-digest-button').click({timeout:12000});
     const cdp=await context.newCDPSession(video);let target;
     await until(async()=>{target=(await cdp.send('Target.getTargets')).targetInfos.find(t=>t.url===`chrome-extension://${extensionId}/sidepanel.html`);return !!target;},'side panel target');
@@ -182,16 +183,29 @@ function attachClient(rootSession,sessionId){
     await until(()=>worker.evaluate(async()=>((await chrome.storage.local.get('ytd_sentences')).ytd_sentences?.[0]?.analysisStatus==='ready')),'sentence analysis');
     const entry=await worker.evaluate(async()=>(await chrome.storage.local.get('ytd_sentences')).ytd_sentences[0]);assert.match(entry.term,/Consistency/);assert.match(entry.term,/The book/);assert.doesNotMatch(entry.term,/Explain|Save|解释|收藏|0:00|中文测试/);assert.equal(entry.timestampSeconds,0);
     await panel.click('.learning-float button','关闭');await panel.evaluate(()=>getSelection().removeAllRanges());
-    // Restore following while the same subtitle is already highlighted.
-    await worker.evaluate(async()=>{const [tab]=await chrome.tabs.query({active:true,lastFocusedWindow:true});await chrome.scripting.executeScript({target:{tabId:tab.id},func:()=>Object.defineProperty(document.querySelector('video'),'currentTime',{configurable:true,get:()=>22})});});
+    // Return is an action: repeated clicks must recenter a paused, highlighted row.
+    await worker.evaluate(async()=>{const [tab]=await chrome.tabs.query({active:true,lastFocusedWindow:true});await chrome.scripting.executeScript({target:{tabId:tab.id},func:()=>{document.querySelector('video').pause();Object.defineProperty(document.querySelector('video'),'currentTime',{configurable:true,get:()=>22});}});});
     await until(()=>panel.evaluate(()=>document.querySelector('.active-playback')?.dataset.seconds==='22'),'active playback subtitle');
-    await sleep(1200);
-    await panel.evaluate(()=>{const area=document.getElementById('contentArea');area.scrollTop=area.scrollHeight;});
-    await until(()=>panel.evaluate(()=>document.getElementById('followPlaybackToggle').getAttribute('aria-pressed')==='false'),'manual scroll turns following off');
-    await panel.click('#followPlaybackToggle');await sleep(700);
-    assert.equal(await panel.evaluate(()=>document.getElementById('followPlaybackToggle').getAttribute('aria-pressed')),'true');
-    assert.ok(await panel.evaluate(()=>{const r=document.querySelector('.active-playback').getBoundingClientRect();return r.top>=80&&r.bottom<innerHeight;}),'follow button recenters the existing active row');
-    await panel.screenshot('06-follow.png');await worker.evaluate(async()=>{const [tab]=await chrome.tabs.query({active:true,lastFocusedWindow:true});await chrome.scripting.executeScript({target:{tabId:tab.id},func:()=>delete document.querySelector('video').currentTime});});
+    assert.equal(await panel.evaluate(()=>document.getElementById('returnToPlaybackBtn').hasAttribute('aria-pressed')),false);
+    for (let attempt=0;attempt<2;attempt++) {
+      await sleep(1100);
+      await panel.evaluate(()=>{const area=document.getElementById('contentArea');area.scrollTop=area.scrollHeight;});
+      await panel.click('#returnToPlaybackBtn');
+      await until(()=>panel.evaluate(()=>{const r=document.querySelector('.active-playback').getBoundingClientRect();return r.top>=80&&r.bottom<innerHeight;}),'return button recenters paused row');
+      assert.equal(await panel.evaluate(()=>document.getElementById('returnToPlaybackBtn').textContent),'回到播放位置');
+      assert.equal(await video.locator('video').evaluate(v=>v.paused),true,'return must not start playback');
+    }
+    // A fresh time must win over the previous highlight, without seeking the video.
+    await worker.evaluate(async()=>{const [tab]=await chrome.tabs.query({active:true,lastFocusedWindow:true});await chrome.scripting.executeScript({target:{tabId:tab.id},func:()=>Object.defineProperty(document.querySelector('video'),'currentTime',{configurable:true,get:()=>65})});});
+    await panel.click('#returnToPlaybackBtn');
+    await until(()=>panel.evaluate(()=>document.querySelector('.active-playback')?.dataset.seconds==='65'),'return reads current playback time');
+    await panel.screenshot('06-follow.png');
+    // A disconnected player produces feedback and leaves the action retryable.
+    await video.locator('video').evaluate(v=>v.remove());
+    await panel.click('#returnToPlaybackBtn');
+    await until(()=>panel.evaluate(()=>document.getElementById('playbackPositionStatus').textContent.includes('刷新视频')),'missing player feedback');
+    assert.equal(await panel.evaluate(()=>document.getElementById('returnToPlaybackBtn').disabled),false);
+    await video.evaluate(()=>{const v=document.createElement('video');v.muted=true;document.getElementById('movie_player').append(v);});
     await panel.click('[data-tab="library"]');await panel.click('#librarySentencesTab');
     await until(()=>panel.evaluate(()=>document.querySelectorAll('#sentencesList .learning-card').length===1),'sentence library');
     await panel.click('#sentencesList button','修改分类');

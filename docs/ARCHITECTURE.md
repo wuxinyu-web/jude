@@ -48,3 +48,7 @@ Content playback heartbeats run each second; side-panel rendering polls every 50
 `lib/local-asr.js` owns the side-panel job controls and strict result validation. Its loopback HTTP requests communicate with the separately started `local-asr/server.py`. Only video identities cross that boundary. The local worker downloads public Bilibili audio and runs MLX Whisper with `task=transcribe, language=en`; it never receives source Chinese captions as model input. Processing progress is persistent, cancellation terminates the process group, and incomplete jobs are marked failed after restart. The panel stores job IDs to resume observation without requiring the side panel to stay open.
 
 Applying ASR validates the current video, increments digest/translation/analysis generations, clears translations derived from the old source, and stores a native subtitle backup in the same digest cache. Chinese source captions are aligned by overlapping time windows for bilingual viewing; they are never sent through a Chinese-to-Chinese translation pass. Restoring the native source invalidates the ASR-derived UI context in the same way. Closed/changed panels do not apply a stale job to another video.
+
+### 1.6.1 播放位置定位
+
+工具栏提供固定动作「回到播放位置」，不使用开关语义。每次读取当前活动视频的时间，验证视频和请求代际后强制定位已高亮的字幕，暂停不影响定位。缺少播放器或连接失效时提供可重试提示。定位只滚动字幕，不跳转或启动视频；手动浏览后可再次定位并恢复既有自动跟随。

@@ -37,6 +37,6 @@ test('missing/login-required subtitles, hostile CDN and nonexistent parts fail e
 });
 test('Chinese UI, persistent follow control and optional YouTube key are part of runtime files',()=>{
  const html=fs.readFileSync('sidepanel.html','utf8'),options=fs.readFileSync('options.html','utf8'),js=fs.readFileSync('options.js','utf8');
- assert.match(html,/id="followPlaybackToggle"/);for(const label of ['字幕','概览','收藏库','学习'])assert.ok(html.includes(`>${label}</button>`));
+ assert.match(html,/id="returnToPlaybackBtn"/);for(const label of ['字幕','概览','收藏库','学习'])assert.ok(html.includes(`>${label}</button>`));
  assert.match(options,/哔哩哔哩字幕/);assert.match(options,/保存设置/);assert.doesNotMatch(js,/if \(!settings.supadataApiKey\)/);
 });
