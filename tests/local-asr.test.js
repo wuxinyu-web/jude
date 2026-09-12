@@ -24,3 +24,9 @@ test('movie ASR accepts timestamps beyond 90 minutes but rejects over three hour
  assert.equal(C.validateResult({...result,transcript:[{text:'The end.',start:6790,duration:10}]},id).transcript[0].start,6790);
  assert.throws(()=>C.validateResult({...result,transcript:[{text:'Too long.',start:10805,duration:2}]},id));
 });
+
+test('sentence Chinese does not repeat a broad native paragraph under shorter English rows',()=>{
+ const broad=[{start:0,duration:30,text:'多个句子组成的一大段中文'}];
+ assert.equal(C.alignChineseSentence({start:4,duration:5},broad),'');
+ assert.equal(C.alignChineseSentence({start:0,duration:4},[{start:0,duration:4,text:'这一句对应的中文'}]),'这一句对应的中文');
+});

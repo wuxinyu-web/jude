@@ -69,7 +69,7 @@ html.immersive body{background:#121313;color:#edece6;height:100vh;overflow:hidde
 html.immersive body>.header,html.immersive #tabsNav,html.immersive .section-title,html.immersive .transcript-search,html.immersive #transcriptSourceBadge,html.immersive #copyTranscriptBtn,html.immersive #exportTranscriptBtn,html.immersive #localAsrRestore,html.immersive #followPlaybackBtn{display:none!important}
 html.immersive #contentArea{height:100vh;max-height:none;overflow:auto;padding:0 12px 20px;scrollbar-width:thin;scrollbar-color:#596451 #121313}
 html.immersive .section{padding:0;margin:0}html.immersive .sticky-control-row{top:0;background:#121313;padding:7px 0;z-index:20;gap:8px;flex-wrap:wrap}
-html.immersive .transcript-entry{padding:14px 8px;gap:16px;border-radius:7px}html.immersive .transcript-copy,html.immersive .transcript-text{font-size:clamp(16px,1.65vw,24px);line-height:1.6;min-width:0;overflow-wrap:anywhere}
+html.immersive .transcript-entry{padding:14px 8px;gap:16px;border-radius:7px}html.immersive .transcript-copy,html.immersive .transcript-text{font-size:clamp(15px,1.35vw,20px);line-height:1.55;min-width:0;overflow-wrap:anywhere}
 html.immersive .transcript-translation{font-size:clamp(14px,1.25vw,19px);color:#c3cbbd;border-color:#353d33}html.immersive .transcript-entry.active-playback{background:#273223}
 html.immersive .transcript-row-action{font-size:11px;padding:5px 9px}html.immersive .transcript-time{color:#b3c59f}
 html.immersive .learning-float{max-height:calc(100vh - 16px);background:#202622;color:#f2f2ea;border-color:#55654e}

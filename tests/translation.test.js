@@ -1000,3 +1000,23 @@ test("Chinese prompt preserves natural bilingual-learning style rules", () => {
   assert.match(prompt, /spaces between Chinese and adjacent English words or digits/);
   assert.match(prompt, /source-language `text`/);
 });
+
+
+test("default transcript rows keep short complete sentences separate",()=>{
+ const {groupTranscriptEntries}=loadSidepanelHelpers();
+ const rows=groupTranscriptEntries([{start:0,duration:6,text:"Hello. How are you? I'm fine!"}]);
+ assert.deepEqual(Array.from(rows,r=>r.text),["Hello.","How are you?","I'm fine!"]);
+ assert.ok(rows[1].start>rows[0].start);assert.ok(rows.every(r=>r.start+r.duration<=6));
+});
+test("unpunctuated native cues are not joined into a paragraph",()=>{
+ const {groupTranscriptEntries}=loadSidepanelHelpers();
+ const source=[{start:0,duration:2,text:"whatever Dad makes"},{start:2,duration:3,text:"you have to take a bite"},{start:5,duration:2,text:"and say mmm"}];
+ assert.deepEqual(Array.from(groupTranscriptEntries(source),r=>r.text),source.map(r=>r.text));
+});
+test("abbreviations stay intact and long unpunctuated cues remain bounded without inventing words",()=>{
+ const {groupTranscriptEntries}=loadSidepanelHelpers();
+ const sentence="Dr. Smith paid $3.50 for it.";
+ assert.equal(groupTranscriptEntries([{start:0,duration:3,text:sentence}])[0].text,sentence);
+ const text=Array(100).fill("word").join(" ");const rows=groupTranscriptEntries([{start:0,duration:30,text}]);
+ assert.ok(rows.every(r=>r.text.length<=180));assert.equal(rows.map(r=>r.text).join(" "),text);
+});

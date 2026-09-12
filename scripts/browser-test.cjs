@@ -78,6 +78,8 @@ function attachClient(rootSession,sessionId){
       await until(async()=>(await frame.locator('.transcript-translation').first().innerText()).includes('中文测试译文'),'default Chinese');
       assert.equal(await frame.locator('.header').isVisible(),false);assert.equal(await frame.locator('[data-panel=study]').isVisible(),false);assert.equal(await frame.locator('[data-panel=library]').isVisible(),false);
       assert.equal(await frame.locator('[data-transcript-mode=bilingual]').getAttribute('aria-pressed'),'true');
+      assert.equal(await frame.locator('.transcript-original').first().innerText(),'Consistency is important when you learn something new.','one sentence per row');
+      assert.ok(await frame.locator('.transcript-original').first().evaluate(e=>parseFloat(getComputedStyle(e).fontSize)<=20),'smaller immersive English');
       // Reproduce an old page host around freshly loaded iframe assets.
       await video.evaluate(()=>{
         const shadow=document.querySelector('#ytd-layout-dock').shadowRoot;
@@ -108,7 +110,7 @@ function attachClient(rootSession,sessionId){
       await video.getByRole('separator').dblclick();
       await until(()=>worker.evaluate(async()=>(await chrome.storage.local.get('ytd_layout_preferences')).ytd_layout_preferences.immersiveHeight===30),'double click resets height');
       await video.getByRole('separator').focus();await video.keyboard.press('ArrowUp');
-      await frame.locator('[data-transcript-mode=original]').click();assert.equal(await frame.locator('.transcript-original').count(),0);await frame.locator('[data-transcript-mode=bilingual]').click();
+      await frame.locator('[data-transcript-mode=original]').click();await until(async()=>await frame.locator('.transcript-original').count()===0,'original mode renders');await frame.locator('[data-transcript-mode=bilingual]').click();await until(async()=>await frame.locator('.transcript-original').count()>0,'bilingual mode renders');
       await frame.locator('#contentArea').evaluate(e=>e.scrollTop=0);await sleep(600);await video.screenshot({path:path.join(out,'before-hover.png')});
       const point=await frame.locator('.transcript-original').first().evaluate(e=>{const w=document.createTreeWalker(e,NodeFilter.SHOW_TEXT);const n=w.nextNode();const r=document.createRange();r.setStart(n,0);r.setEnd(n,Math.min(8,n.length));const b=r.getBoundingClientRect();return {x:b.x+b.width/2,y:b.y+b.height/2};});const offset=await video.locator('#ytd-layout-dock iframe').boundingBox();await video.mouse.move(offset.x+point.x,offset.y+point.y);
       assert.equal(await frame.evaluate(()=>[...CSS.highlights.get('ytd-hover-word')][0].toString()),'Consistency','word paints before lookup completes');
@@ -222,7 +224,7 @@ function attachClient(rootSession,sessionId){
         await until(()=>frame.locator('#localAsrCancel').isVisible(),'running job can cancel');
         await frame.locator('#localAsrCancel').click();await until(()=>frame.locator('#localAsrStatus').innerText().then(t=>t.includes('已取消')),'cancel reported');
         complete=true;await frame.locator('#localAsrStart').click();
-        await until(()=>frame.locator('.transcript-original').count().then(n=>n===2),'movie audio applied');
+        await until(()=>frame.locator('.transcript-original').count().then(n=>n>=2),'movie audio applied');
         await until(()=>frame.locator('.transcript-translation').first().innerText().then(t=>t.includes('中文测试译文')),'English to Chinese translation');
         assert.equal(await frame.evaluate(()=>YTD_PANEL.context().hasNativeBackup),false);
         assert.equal(await frame.evaluate(()=>YTD_PANEL.rawSegments()[1].start),6780);
@@ -255,14 +257,14 @@ function attachClient(rootSession,sessionId){
           complete=true;await until(()=>frame.evaluate(()=>!YTD_PANEL.context().partial),'completion clears partial marker');
         }else{complete=true;await frame.locator('[data-transcript-mode=bilingual]').click();}
         await until(async()=>(await frame.locator('#transcriptList').innerText()).includes('An object'),'English applied without leaving immersion');
-        assert.ok((await frame.locator('.transcript-translation').first().innerText()).includes('静止'));assert.equal(starts,3);assert.equal(await worker.evaluate(()=>__fixtureCalls.length),0);
+        await until(async()=>(await frame.locator('.transcript-translation').first().innerText()).includes('中文测试译文'),'split ASR sentence translated separately');assert.equal(starts,3);assert.ok(await worker.evaluate(()=>__fixtureCalls.length>0));
         await video.screenshot({path:path.join(out,'auto-asr-bilingual.png')});
         assert.equal(starts,3);
-        fs.writeFileSync(path.join(out,'result.json'),JSON.stringify({passed:true,checks:['automatic-start','failure-visible','no-retry-loop','inline-cancel','inline-retry','auto-bilingual','native-Chinese-retained','no-cloud-translation','sticky-progress-after-scroll','Chinese-button-selection','bilingual-click-retry',...(process.env.YTD_TEST_PROGRESSIVE==='1'?['buffer-19-waits','buffer-20-releases','video-keeps-playing','resume-partial','background-appends','completion-clears-marker']:[])]}));panel=null;console.log('PASS: automatic immersive ASR, failure, cancellation and bilingual completion');return;
+        fs.writeFileSync(path.join(out,'result.json'),JSON.stringify({passed:true,checks:['automatic-start','failure-visible','no-retry-loop','inline-cancel','inline-retry','auto-bilingual','native-Chinese-retained','split-sentence-translation','sticky-progress-after-scroll','Chinese-button-selection','bilingual-click-retry',...(process.env.YTD_TEST_PROGRESSIVE==='1'?['buffer-19-waits','buffer-20-releases','video-keeps-playing','resume-partial','background-appends','completion-clears-marker']:[])]}));panel=null;console.log('PASS: automatic immersive ASR, failure, cancellation and bilingual completion');return;
       }
       await panel.click('[data-transcript-mode="bilingual"]');
       assert.equal(await worker.evaluate(()=>__fixtureCalls.length),0,'Chinese source never translates Chinese to Chinese');
-      assert.ok(await panel.evaluate(()=>document.getElementById('localAsrStatus').textContent.includes('转写英文原声')));
+      await until(()=>panel.evaluate(()=>document.getElementById('localAsrStatus').textContent.includes('转写英文原声')),'ASR progress received');
       await until(()=>panel.evaluate(()=>!document.getElementById('localAsrCancel').hidden),'bilingual click starts transcription');
       await panel.click('#localAsrCancel');await until(()=>panel.evaluate(()=>document.getElementById('localAsrStatus').textContent.includes('已取消')),'cancelled');
       assert.ok(await panel.evaluate(()=>document.querySelector('.transcript-text').textContent.includes('静止')),'cancel preserves Chinese');
@@ -273,8 +275,9 @@ function attachClient(rootSession,sessionId){
       assert.equal(stored.transcriptSource,'local-asr');assert.equal(stored.nativeTranscriptBackup.language,'ai-zh');
       await panel.click('[data-transcript-mode="bilingual"]');
       assert.ok(await panel.evaluate(()=>document.querySelector('.transcript-original').textContent.includes('An object')));
-      assert.ok(await panel.evaluate(()=>document.querySelector('.transcript-translation').textContent.includes('静止')));
-      assert.equal(await worker.evaluate(()=>__fixtureCalls.length),0,'Chinese alignment uses original track, not AI rewrite');
+      await until(()=>panel.evaluate(()=>document.querySelector('.transcript-translation').textContent.includes('中文测试译文')),'broad Chinese cue replaced with sentence translation');
+      assert.ok(await worker.evaluate(()=>__fixtureCalls.length>0));
+      assert.ok(await panel.evaluate(()=>[...document.querySelectorAll('.transcript-translation')].some(e=>e.textContent.includes('她推荐'))),'matching native Chinese still reused');
       await panel.screenshot('09-original-asr.png');
       await panel.click('#localAsrRestore');await until(()=>panel.evaluate(()=>document.querySelector('.transcript-text')?.textContent.includes('静止')),'restore native');
       const before=await panel.evaluate(()=>document.getElementById('transcriptList').textContent);
@@ -358,7 +361,7 @@ function attachClient(rootSession,sessionId){
     await until(()=>panel.evaluate(()=>document.querySelectorAll('.transcript-translation:not(.translation-pending)').length>=2),'bilingual translated rows');
     // Collect across rows; DOM Range extraction must omit Chinese, timestamps and buttons.
     await panel.evaluate(()=>{
-      const roots=document.querySelectorAll('.transcript-original'),range=document.createRange();range.setStart(roots[0],0);range.setEnd(roots[1],roots[1].childNodes.length);const s=getSelection();s.removeAllRanges();s.addRange(range);document.dispatchEvent(new PointerEvent('pointerup',{bubbles:true}));
+      const roots=document.querySelectorAll('.transcript-original'),range=document.createRange();range.setStart(roots[0],0);const last=[...roots].find(e=>e.textContent.includes('The book'));range.setEnd(last,last.childNodes.length);const s=getSelection();s.removeAllRanges();s.addRange(range);document.dispatchEvent(new PointerEvent('pointerup',{bubbles:true}));
     });
     await panel.click('.learning-float button','收藏句子');
     await until(()=>worker.evaluate(async()=>((await chrome.storage.local.get('ytd_sentences')).ytd_sentences?.[0]?.analysisStatus==='ready')),'sentence analysis');

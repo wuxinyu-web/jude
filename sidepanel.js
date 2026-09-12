@@ -409,10 +409,11 @@ function setupTranscriptViewStateListeners() {
 // ============================================================
 
 const TRANSCRIPT_SEGMENT_LIMITS = Object.freeze({
-  minChars: 60,
-  idealChars: 180,
-  maxChars: 320,
-  maxSeconds: 20,
+  minChars: 1,
+  idealChars: 120,
+  maxChars: 180,
+  maxSeconds: 8,
+  preserveCues: true,
 });
 
 function normalizeCaptionText(text) {
@@ -469,13 +470,18 @@ function groupTranscriptEntries(entries, limits = TRANSCRIPT_SEGMENT_LIMITS) {
     const text = normalizeCaptionText(entry?.text);
     if (!text) return;
     const start = Number.isFinite(Number(entry.start)) ? Number(entry.start) : 0;
-    const duration = Math.max(0, Number(entry.duration) || 0);
-    const sentenceParts =
-      text.match(/[^.!?;:,。！？；：，]+(?:[.!?;:,。！？；：，]+["')\]”’）】」』]*|$)/g) ||
+    const duration = Math.max(0, Number(entry.duration) || (Number(entries[entryIndex+1]?.start)-start) || 0);
+    const sentenceParts = limits.preserveCues && typeof Intl.Segmenter === "function"
+      ? Array.from(new Intl.Segmenter("en",{granularity:"sentence"}).segment(text), item=>item.segment).reduce((parts,part)=>{
+          if(parts.length && /\b(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|St|[A-Z])\.$/.test(parts[parts.length-1].trim()))parts[parts.length-1]+=part;
+          else parts.push(part);
+          return parts;
+        },[])
+      : text.match(/[^.!?;:,。！？；：，]+(?:[.!?;:,。！？；：，]+["')\]”’）】」』]*|$)/g) ||
       [text];
     let consumedChars = 0;
 
-    sentenceParts.forEach((sentencePart) => {
+    sentenceParts.forEach((sentencePart, sentenceIndex) => {
       const cleanPart = normalizeCaptionText(sentencePart);
       if (!cleanPart) return;
       const oversizedParts = splitOversizedThought(cleanPart, limits.maxChars);
@@ -484,6 +490,8 @@ function groupTranscriptEntries(entries, limits = TRANSCRIPT_SEGMENT_LIMITS) {
         pieces.push({
           text: part,
           start: start + duration * ratio,
+          end: start + duration * Math.min(1,(consumedChars+part.length)/text.length),
+          cueEnd: sentenceIndex===sentenceParts.length-1 && partIndex===oversizedParts.length-1,
           semanticEnd:
             /[.!?。！？]["')\]”’）】」』]*$/.test(part) ||
             oversizedParts.length > 1,
@@ -505,6 +513,7 @@ function groupTranscriptEntries(entries, limits = TRANSCRIPT_SEGMENT_LIMITS) {
     grouped.push({
       id: `segment-${index}-${Math.round(current.start * 1000)}`,
       start: current.start,
+      duration: Math.max(0,current.end-current.start),
       text,
       texts: [text],
     });
@@ -514,6 +523,7 @@ function groupTranscriptEntries(entries, limits = TRANSCRIPT_SEGMENT_LIMITS) {
   pieces.forEach((piece) => {
     if (!current) current = { start: piece.start, text: "" };
     current.text = normalizeCaptionText(`${current.text} ${piece.text}`);
+    current.end = piece.end;
     const elapsed = Math.max(0, piece.start - current.start);
     const comfortablySized = current.text.length >= limits.minChars;
     const reachedIdeal = current.text.length >= limits.idealChars;
@@ -531,6 +541,7 @@ function groupTranscriptEntries(entries, limits = TRANSCRIPT_SEGMENT_LIMITS) {
       elapsed >= limits.maxSeconds + 5;
 
     if (
+      (limits.preserveCues && (piece.semanticEnd || piece.cueEnd)) ||
       (atNaturalBoundary && (comfortablySized || elapsed >= 8)) ||
       (atNaturalBoundary && reachedIdeal) ||
       reachedGuardrail ||
@@ -3878,7 +3889,7 @@ function getActiveTranscriptSegments() {
 }
 
 function transcriptTranslationCacheKey(segment) {
-  return `${currentVideoId}:zh:semantic:${segment.id}`;
+  return `${currentVideoId}:zh:sentence-v2:${segment.id}:${segment.text}`;
 }
 
 function setTranscriptModeButtons(mode) {
@@ -3949,7 +3960,7 @@ function renderTranscriptModeRows(segments, mode) {
   const originalLabel = getOriginalTranscriptLabel();
   const modeLabel =
     mode === "bilingual"
-      ? `${originalLabel} + ${currentTranscriptSource==="local-asr"&&currentNativeTranscriptBackup?"原站中文字幕（按时间对齐）":"简体中文"}`
+      ? `${originalLabel} + ${currentTranscriptSource==="local-asr"&&currentNativeTranscriptBackup?"中文逐句对照":"简体中文"}`
       : `简体中文 · 对照${originalLabel}`;
   badge.innerHTML = renderTranscriptSourceBadge(modeLabel);
   transcriptList.parentElement.insertBefore(badge, transcriptList);
@@ -4140,13 +4151,13 @@ function retryTranslationSegment(index, generation) {
 async function translateTranscript() {
   setTranscriptModeButtons(currentTranscriptMode);
   if(/^(ai-)?zh(?:-|$)/i.test(currentTranscriptLanguage||"")) {currentTranscriptMode="original";renderTranscript();setTranscriptModeButtons(pendingOriginalAudioMode||"original");return;}
-  if(currentTranscriptSource==="local-asr" && /^(ai-)?zh(?:-|$)/i.test(currentNativeTranscriptBackup?.language||"")){
-    translationGeneration++;transcriptScrollObserver?.disconnect();transcriptScrollObserver=null;
-    const groups=getActiveTranscriptSegments();
-    for(const [index,group] of groups.entries()){const end=groups[index+1]?.start ?? Math.max(...currentTranscript.map(item=>item.start+item.duration));transcriptParagraphCache.set(transcriptTranslationCacheKey(group),YTD_ASR_CORE.alignChinese({...group,duration:end-group.start},currentNativeTranscriptBackup.transcript)||"此时间段暂无原站中文字幕。");}
-    renderTranscriptModeRows(groups,currentTranscriptMode);return;
-  }
   const segments = getActiveTranscriptSegments();
+  if(currentTranscriptSource==="local-asr" && /^(ai-)?zh(?:-|$)/i.test(currentNativeTranscriptBackup?.language||"")){
+    for(const segment of segments){
+      const aligned=YTD_ASR_CORE.alignChineseSentence(segment,currentNativeTranscriptBackup.transcript);
+      if(aligned)transcriptParagraphCache.set(transcriptTranslationCacheKey(segment),aligned);
+    }
+  }
   if (!segments.length || currentTranscriptMode === "original") return;
 
   translationGeneration += 1;
