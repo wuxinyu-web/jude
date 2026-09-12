@@ -88,3 +88,5 @@ The local worker publishes atomic partial snapshots after each 30-second chunk, 
 The first English snapshot is buffered until 20 subtitle entries are available; completed short transcripts bypass this threshold. Existing English receives later progressive updates immediately. The status exposes the initial buffer count. Tests cover 19 waiting, 20 releasing, background appends and continued actual HTMLVideoElement playback.
 
 1.11.1 host controls overlay the same 40px toolbar row as iframe transcript controls. Only host buttons accept pointer events; the remaining header surface passes through to the iframe. Reserved inline space and narrow-screen rules prevent control overlap. No new messaging or timing paths.
+
+1.11.2 shares host toolbar styles between content scripts and the worker. The embedded immersive extension frame requests an idempotent host-only style sync on startup, scoped to its sender tab and exact iframe URL. This repairs mixed-version hosts after reload without replacing the player or subtitle iframe. No collection or transcript data is sent.

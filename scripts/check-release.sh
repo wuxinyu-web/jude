@@ -49,6 +49,7 @@ public_allowlist=(
   "PRIVACY.md"
   "SECURITY.md"
   "LICENSE"
+  "lib/layout-toolbar.js"
   "lib/layout-worker.js"
   "lib/layout-content.js"
   "lib/layout-ui.js"

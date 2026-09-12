@@ -15,7 +15,7 @@
 // chrome.storage.local and are never part of the extension source.
 importScripts("lib/platform.js", "settings.js", "lib/wbi.js", "lib/bili-api.js", "lib/bilibili-transcript.js");
 
-importScripts("lib/layout-worker.js");
+importScripts("lib/layout-toolbar.js", "lib/layout-worker.js");
 
 const DEBUG = false;
 const AI_PROVIDER_IDLE_TIMEOUT_MS = 50_000;

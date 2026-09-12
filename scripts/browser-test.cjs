@@ -71,11 +71,27 @@ function attachClient(rootSession,sessionId){
 
     if(process.env.YTD_TEST_IMMERSIVE==='1'||process.env.YTD_TEST_LAYOUT==='1'){
       const setTime=t=>worker.evaluate(async t=>{const [tab]=await chrome.tabs.query({active:true,lastFocusedWindow:true});await chrome.scripting.executeScript({target:{tabId:tab.id},args:[t],func:t=>Object.defineProperty(document.querySelector('video'),'currentTime',{configurable:true,get:()=>t})});},t);await setTime(2);
+      assert.equal(await panel.evaluate(async()=>(await chrome.runtime.sendMessage({action:'syncImmersiveToolbar'})).success),false);
       await panel.click('#enterImmersive');let frame;
       await until(async()=>{frame=video.frames().find(f=>f.url().includes('immersive=1'));return frame&&await frame.locator('.transcript-original').count()>2;},'reused bilingual transcript',20000);
       await until(async()=>(await frame.locator('.transcript-translation').first().innerText()).includes('中文测试译文'),'default Chinese');
       assert.equal(await frame.locator('.header').isVisible(),false);assert.equal(await frame.locator('[data-panel=study]').isVisible(),false);assert.equal(await frame.locator('[data-panel=library]').isVisible(),false);
       assert.equal(await frame.locator('[data-transcript-mode=bilingual]').getAttribute('aria-pressed'),'true');
+      // Reproduce an old page host around freshly loaded iframe assets.
+      await video.evaluate(()=>{
+        const shadow=document.querySelector('#ytd-layout-dock').shadowRoot;
+        shadow.querySelector('#ytd-compact-toolbar').remove();
+        const old=document.createElement('style');old.textContent='header{position:relative;height:20px;background:#121313}iframe{height:calc(100% - 20px)}';shadow.append(old);
+        shadow.querySelector('#close').textContent='关闭学习区';
+      });
+      assert.equal(await frame.evaluate(async()=>(await chrome.runtime.sendMessage({action:'syncImmersiveToolbar'})).success),true);
+      assert.equal(await frame.evaluate(async()=>(await chrome.runtime.sendMessage({action:'syncImmersiveToolbar'})).success),true);
+      const toolbar=await video.evaluate(()=>{
+        const host=document.querySelector('#ytd-layout-dock'),shadow=host.shadowRoot;
+        return {offset:shadow.querySelector('iframe').getBoundingClientRect().top-host.getBoundingClientRect().top,
+          close:shadow.querySelector('#close').textContent,styles:shadow.querySelectorAll('#ytd-compact-toolbar').length};
+      });
+      assert.deepEqual(toolbar,{offset:0,close:'×',styles:1});
       const geometry=await video.evaluate(()=>({p:document.querySelector('#movie_player').getBoundingClientRect().toJSON(),d:document.querySelector('#ytd-layout-dock').getBoundingClientRect().toJSON()}));assert.ok(geometry.p.height>=600);assert.ok(Math.abs(geometry.p.bottom-geometry.d.top)<2);
       await video.getByRole('separator').focus();await video.keyboard.press('ArrowUp');await until(()=>worker.evaluate(async()=>(await chrome.storage.local.get('ytd_layout_preferences')).ytd_layout_preferences.immersiveHeight===35),'resize height persists');
       await frame.locator('[data-transcript-mode=original]').click();assert.equal(await frame.locator('.transcript-original').count(),0);await frame.locator('[data-transcript-mode=bilingual]').click();
@@ -151,7 +167,8 @@ function attachClient(rootSession,sessionId){
         });
       });await new Promise((resolve,reject)=>{asrServer.once('error',reject);asrServer.listen(Number(process.env.YTD_TEST_ASR_PORT)||8766,'127.0.0.1',resolve);});
       if(process.env.YTD_TEST_AUTO_ASR==='1'){
-        await panel.click('#enterImmersive');let frame;
+        assert.equal(await panel.evaluate(async()=>(await chrome.runtime.sendMessage({action:'syncImmersiveToolbar'})).success),false);
+      await panel.click('#enterImmersive');let frame;
         await until(async()=>{frame=video.frames().find(f=>f.url().includes('immersive=1'));return frame&&(await frame.locator('#localAsrStatus').innerText()).includes('暂不可用');},'automatic ASR failure visible');
         assert.equal(starts,1);await sleep(2500);assert.equal(starts,1,'failure does not automatically loop');
         await frame.locator('#contentArea').hover({position:{x:10,y:230}});await video.mouse.wheel(0,500);await sleep(500);
