@@ -97,3 +97,11 @@ html.immersive .error-container{min-height:0;gap:8px;padding:12px 8px}
 html.immersive .error-icon{font-size:24px}html.immersive .error-title{font-size:18px}
 html.immersive .error-message{max-width:680px;font-size:12px}
 html.immersive .error-btn{margin-top:0;padding:8px 18px;color:#172012}
+
+/* Word actions stay in the header while only the definition loads or scrolls. */
+.learning-float.learning-word-float{width:400px;display:flex;flex-direction:column;overflow:hidden}
+.learning-word-header{display:flex;align-items:flex-start;gap:10px;flex-shrink:0}
+.learning-word-header strong{flex:1;min-width:0;align-self:center}
+.learning-word-actions{display:flex;gap:5px;flex-shrink:0}
+.learning-word-actions .learning-button{margin:0;padding:5px 7px;white-space:nowrap}
+.learning-word-definition{min-height:0;overflow:auto;overscroll-behavior:contain}

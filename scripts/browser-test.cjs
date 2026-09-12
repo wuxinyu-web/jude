@@ -45,7 +45,7 @@ function attachClient(rootSession,sessionId){
           return new Response(JSON.stringify(payload),{headers:{'Content-Type':'application/json'}});
         }
         if(String(url).startsWith('https://api.deepseek.com/')){
-          const req=JSON.parse(options.body);__fixtureCalls.push(req);if(__fixtureDelay)await new Promise(r=>setTimeout(r,__fixtureDelay));
+          const req=JSON.parse(options.body);__fixtureCalls.push(req);if(globalThis.__fixtureFailure)return new Response(JSON.stringify({error:{message:'测试查词失败'}}),{status:503,headers:{'Content-Type':'application/json'}});if(__fixtureDelay)await new Promise(r=>setTimeout(r,__fixtureDelay));
           let payload;try{payload=JSON.parse(req.messages[1].content);}catch{}
           if(payload?.segments){return new Response(JSON.stringify({choices:[{message:{content:JSON.stringify({segments:payload.segments.map(s=>({id:s.id,text:'中文测试译文：持续练习能够培养学习习惯。'}))})}}]}),{headers:{'Content-Type':'application/json'}});}
           const isSentence=req.messages[0].content.includes('translationZh');
@@ -112,18 +112,29 @@ function attachClient(rootSession,sessionId){
       await video.getByRole('separator').focus();await video.keyboard.press('ArrowUp');
       await frame.locator('[data-transcript-mode=original]').click();await until(async()=>await frame.locator('.transcript-original').count()===0,'original mode renders');await frame.locator('[data-transcript-mode=bilingual]').click();await until(async()=>await frame.locator('.transcript-original').count()>0,'bilingual mode renders');
       await frame.locator('#contentArea').evaluate(e=>e.scrollTop=0);await sleep(600);await video.screenshot({path:path.join(out,'before-hover.png')});
+      await worker.evaluate(()=>{__fixtureDelay=3000;});
+      await frame.evaluate(()=>{window.__spoken=[];window.speechSynthesis.speak=u=>window.__spoken.push(u.text);});
       const point=await frame.locator('.transcript-original').first().evaluate(e=>{const w=document.createTreeWalker(e,NodeFilter.SHOW_TEXT);const n=w.nextNode();const r=document.createRange();r.setStart(n,0);r.setEnd(n,Math.min(8,n.length));const b=r.getBoundingClientRect();return {x:b.x+b.width/2,y:b.y+b.height/2};});const offset=await video.locator('#ytd-layout-dock iframe').boundingBox();await video.mouse.move(offset.x+point.x,offset.y+point.y);
       assert.equal(await frame.evaluate(()=>[...CSS.highlights.get('ytd-hover-word')][0].toString()),'Consistency','word paints before lookup completes');
       assert.equal(await frame.locator('.learning-float').count(),0,'lookup remains delayed');
       await video.screenshot({path:path.join(out,'word-hover-highlight.png')});
-      await until(async()=>(await frame.locator('.learning-float').innerText()).includes('持续性'),'existing hover lookup');
+      await until(async()=>await frame.locator('.learning-word-actions button').count()===3,'all actions appear during lookup');
+      assert.ok((await frame.locator('.learning-float').innerText()).includes('正在查词'));
+      assert.deepEqual(await frame.locator('.learning-word-actions button').allTextContents(),['发音','收藏单词','关闭']);
+      const wordHeaderGeometry=await frame.locator('.learning-word-header').evaluate(e=>{const word=e.querySelector('strong').getBoundingClientRect(),actions=e.querySelector('.learning-word-actions').getBoundingClientRect();return {right:actions.left>=word.right,aligned:Math.abs(actions.top-word.top)<10};});
+      assert.deepEqual(wordHeaderGeometry,{right:true,aligned:true},'actions sit beside the word');
       const clickFloat=async label=>{
         const box=await frame.getByRole('button',{name:label,exact:true}).evaluate(e=>{const r=e.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};});
         const host=await video.locator('#ytd-layout-dock iframe').boundingBox();
         await video.mouse.click(host.x+box.x,host.y+box.y);
       };
+      await clickFloat('发音');
+      await until(()=>frame.evaluate(()=>window.__spoken.includes('Consistency')),'pronunciation works before definition');
+      await video.screenshot({path:path.join(out,'word-actions-loading.png')});
       await clickFloat('收藏单词');
+      await until(async()=>await frame.getByRole('button',{name:'收藏中…',exact:true}).isDisabled(),'save accepts click during lookup');
       await until(()=>worker.evaluate(async()=>((await chrome.storage.local.get('ytd_vocabulary')).ytd_vocabulary||[]).length===1),'hover word saved');
+      await worker.evaluate(()=>{__fixtureDelay=0;});
       await clickFloat('关闭');
       await video.mouse.move(offset.x+offset.width/2,offset.y+15);
       await until(async()=>!(await frame.evaluate(()=>CSS.highlights.has('ytd-hover-word'))),'leaving word clears transient highlight');
@@ -289,14 +300,17 @@ function attachClient(rootSession,sessionId){
     await sleep(400); // The panel's entry animation must settle before hit testing.
     // A real pointer dwell must not call the provider early or save automatically.
     const point=await panel.evaluate(()=>{const root=document.querySelector('.transcript-text'),r=document.createRange();r.setStart(root.firstChild,0);r.setEnd(root.firstChild,11);const b=r.getBoundingClientRect();return {x:b.left+15,y:b.top+b.height/2};});
+    await worker.evaluate(()=>{__fixtureDelay=2000;});
     await panel.send('Input.dispatchMouseEvent',{type:'mouseMoved',...point});await sleep(250);
     assert.equal(await worker.evaluate(()=>__fixtureCalls.length),0);
-    await until(()=>panel.evaluate(()=>document.querySelector('.learning-float')?.textContent.includes('持续性')),'hover meaning');
+    await until(()=>panel.evaluate(()=>document.querySelector('.learning-float')?.textContent.includes('正在查词')),'actions during loading');
+    assert.deepEqual(await panel.evaluate(()=>[...document.querySelectorAll('.learning-word-actions button')].map(b=>b.textContent)),['发音','收藏单词','关闭']);
     assert.equal(await worker.evaluate(async()=>((await chrome.storage.local.get('ytd_vocabulary')).ytd_vocabulary||[]).length),0);
     await panel.screenshot('01-hover.png');
     await panel.click('.learning-float button','收藏单词');
     await until(()=>worker.evaluate(async()=>((await chrome.storage.local.get('ytd_vocabulary')).ytd_vocabulary||[]).length===1),'saved word');
-    assert.equal(await worker.evaluate(()=>__fixtureCalls.length),1,'save reuses hover enrichment');
+    assert.equal(await worker.evaluate(()=>__fixtureCalls.length),1,'early save reuses pending hover enrichment');
+    await worker.evaluate(()=>{__fixtureDelay=0;});
     await panel.click('.learning-float button','关闭');
     const wordPoint=term=>panel.evaluate(term=>{
       for(const root of document.querySelectorAll('.transcript-text')){
@@ -321,6 +335,21 @@ function attachClient(rootSession,sessionId){
     assert.equal(await panel.evaluate(()=>document.querySelector('.learning-float')?.textContent.includes('正在查词')),true,'old meaning stays hidden');
     await until(()=>panel.evaluate(()=>document.querySelector('.learning-float')?.textContent.includes('持续性')),'replacement result');
     await panel.click('.learning-float button','关闭');await worker.evaluate(()=>{__fixtureDelay=0;});
+    // Failure keeps the same controls usable; close during a retry must not resurrect the dialog.
+    await worker.evaluate(()=>{__fixtureFailure=true;});
+    const when=await wordPoint('when');await panel.send('Input.dispatchMouseEvent',{type:'mouseMoved',...when});
+    await until(()=>panel.evaluate(()=>!![...document.querySelectorAll('.learning-word-definition button')].find(b=>b.textContent==='重试')),'lookup failure offers retry');
+    assert.deepEqual(await panel.evaluate(()=>[...document.querySelectorAll('.learning-word-actions button')].map(b=>b.textContent)),['发音','收藏单词','关闭']);
+    await panel.click('.learning-float button','收藏单词');
+    await until(()=>panel.evaluate(()=>!!document.querySelector('#learningToast:not([hidden])')),'failed save reports error');
+    assert.equal(await panel.evaluate(()=>document.querySelector('.learning-word-actions .primary').disabled),false);
+    assert.equal(await worker.evaluate(async()=>((await chrome.storage.local.get('ytd_vocabulary')).ytd_vocabulary||[]).length),1,'failure never saves placeholder meaning');
+    await worker.evaluate(()=>{__fixtureFailure=false;__fixtureDelay=1200;});
+    await panel.click('.learning-float button','重试');
+    await until(()=>panel.evaluate(()=>document.querySelector('.learning-word-definition')?.textContent.includes('正在查词')),'retry loads');
+    await panel.click('.learning-float button','关闭');await sleep(1500);
+    assert.equal(await panel.evaluate(()=>document.querySelectorAll('.learning-float').length),0,'late result cannot reopen closed dialog');
+    await worker.evaluate(()=>{__fixtureDelay=0;});
     // Start a study session through the actual interface.
     await panel.click('[data-tab="study"]');await panel.click('.learning-start-form button');
     await until(()=>worker.evaluate(async()=>((await chrome.storage.local.get('ytd_study')).ytd_study?.sessions[0]?.status==='running')),'session start');
