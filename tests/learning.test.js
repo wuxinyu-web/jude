@@ -154,7 +154,7 @@ test("collection goals use distinct newly saved IDs of the bound video; end pres
 });
 test("release contains Study instead of Ask and no web-search permission",()=>{
   const root=path.resolve(__dirname,"..");const manifest=JSON.parse(fs.readFileSync(path.join(root,"manifest.json")));
-  assert.match(manifest.name,/开发版/);assert.equal(manifest.version,"1.11.0");assert.equal(manifest.host_permissions.length,7);
+  assert.match(manifest.name,/开发版/);assert.equal(manifest.version,"1.11.1");assert.equal(manifest.host_permissions.length,7);
   const html=fs.readFileSync(path.join(root,"sidepanel.html"),"utf8");assert.match(html,/data-tab="study"/);assert.doesNotMatch(html,/data-tab="ask"/);
   const bg=fs.readFileSync(path.join(root,"background.js"),"utf8");assert.doesNotMatch(bg,/action === "(?:askVideo|suggestVideoQuestions)"/);
   assert.equal(fs.existsSync(path.join(root,"prompts/ask.md")),false);
