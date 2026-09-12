@@ -34,13 +34,13 @@ async function loadSettings() {
       [YTD_SETTINGS.STORAGE_KEY]: settings,
     });
     saveStatus.textContent =
-      "Custom provider settings were removed safely. Your Supadata key was kept, but the AI key was cleared. Enter a DeepSeek API key to continue.";
+      "已清理旧版自定义服务配置并保留 Supadata 密钥。请重新填写 DeepSeek 密钥。";
   }
 }
 
 async function saveSettings(event) {
   event.preventDefault();
-  saveStatus.textContent = "Saving…";
+  saveStatus.textContent = "正在保存…";
 
   try {
     const settings = YTD_SETTINGS.normalize({
@@ -48,31 +48,28 @@ async function saveSettings(event) {
       supadataApiKey: supadataApiKeyInput.value,
     });
 
-    if (!settings.supadataApiKey) {
-      throw new Error("Add a Supadata API key.");
-    }
     if (!settings.aiApiKey) {
-      throw new Error("Add a DeepSeek API key.");
+      throw new Error("请填写 DeepSeek API 密钥。");
     }
 
     await chrome.storage.local.set({
       [YTD_SETTINGS.STORAGE_KEY]: settings,
     });
 
-    saveStatus.textContent = "Saved. Reopen YouTube Digest to use these settings.";
+    saveStatus.textContent = "设置已保存，重新打开学习侧栏即可使用。";
   } catch (error) {
     saveStatus.textContent = error.message;
   }
 }
 
 async function copyCustomizationPrompt() {
-  copyStatus.textContent = "Copying…";
+  copyStatus.textContent = "正在复制…";
   try {
     await navigator.clipboard.writeText(customizationPrompt.value);
-    copyStatus.textContent = "Customization prompt copied.";
+    copyStatus.textContent = "自定义提示词已复制。";
   } catch (_error) {
     copyStatus.textContent =
-      "Could not copy the prompt. Select the prompt text and copy it manually.";
+      "复制失败，请选中提示词手动复制。";
   }
 }
 
@@ -80,21 +77,21 @@ async function clearCachedDigests() {
   const all = await chrome.storage.local.get(null);
   const keys = Object.keys(all).filter((key) => key.startsWith("digest_"));
   if (keys.length) await chrome.storage.local.remove(keys);
-  dataStatus.textContent = `Cleared ${keys.length} cached digest${keys.length === 1 ? "" : "s"}.`;
+  dataStatus.textContent = `已清理 ${keys.length} 个字幕缓存。`;
 }
 
 async function clearNotes() {
   await chrome.storage.local.remove("ytd_notes");
-  dataStatus.textContent = "Deleted all saved notes.";
+  dataStatus.textContent = "已删除全部笔记。";
 }
 
 async function resetAllData() {
   const confirmed = window.confirm(
-    "Delete API keys, cached digests, translations, and saved notes from this Chrome profile?",
+    "确认删除此 Chrome 配置中的密钥、字幕缓存、翻译、词句收藏、笔记与学习记录？",
   );
   if (!confirmed) return;
 
   await chrome.storage.local.clear();
   await loadSettings();
-  dataStatus.textContent = "All YouTube Digest data was deleted.";
+  dataStatus.textContent = "已清空本扩展的全部本地数据。";
 }

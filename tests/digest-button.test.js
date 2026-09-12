@@ -531,8 +531,8 @@ test("invalidated extension context turns Digest into an explicit page refresh",
 
   assert.equal(sendCount, 1);
   assert.equal(reloadCount, 0);
-  assert.equal(button["aria-label"], "Refresh YouTube to reconnect YouTube Digest");
-  assert.match(button.innerHTML, /Refresh page/);
+  assert.equal(button["aria-label"], "刷新视频页以重新连接学习扩展");
+  assert.match(button.innerHTML, /刷新页面/);
 
   await button.listeners.click(event);
 

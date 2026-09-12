@@ -95,7 +95,7 @@ test("background relay fails closed when the active last-focused tab is absent",
   assert.deepEqual(plain(calls.query), [{ active: true, lastFocusedWindow: true }]);
   assert.deepEqual(calls.sendMessage, []);
   assert.equal(result.success, false);
-  assert.match(result.error, /active YouTube tab/i);
+  assert.match(result.error, /视频页/);
 });
 
 test("background relay rejects an active non-YouTube tab without borrowing a YouTube tab", async () => {
@@ -106,7 +106,7 @@ test("background relay rejects an active non-YouTube tab without borrowing a You
   assert.deepEqual(plain(calls.query), [{ active: true, lastFocusedWindow: true }]);
   assert.deepEqual(calls.sendMessage, []);
   assert.equal(result.success, false);
-  assert.match(result.error, /active YouTube tab/i);
+  assert.match(result.error, /视频页/);
 });
 
 test("background relay targets only the exact active YouTube tab", async () => {
@@ -702,7 +702,7 @@ test("Supadata initial request aborts after its per-request timeout", async () =
   timers.fire(30_000);
   const result = await pending;
   assert.equal(result.success, false);
-  assert.match(result.error, /Supadata request timed out/i);
+  assert.match(result.error, /Supadata 请求超过 30 秒/);
   assert.equal(timers.active(30_000), 0);
 });
 
@@ -714,7 +714,7 @@ test("each stalled Supadata poll is aborted without shortening the overall polli
   await nextTurn();
   await nextTurn();
   timers.fire(30_000);
-  await assert.rejects(pending, /Supadata request timed out/i);
+  await assert.rejects(pending, /Supadata 请求超过 30 秒/);
   assert.equal(timers.active(30_000), 0);
 });
 
@@ -746,7 +746,7 @@ test("Supadata streamed JSON is cancelled when it exceeds the ingress cap", asyn
   assert.equal(typeof helpers.handleFetchTranscript, "function");
   const result = await helpers.handleFetchTranscript("video-id", "native");
   assert.equal(result.success, false);
-  assert.match(result.error, /response is too large/i);
+  assert.match(result.error, /返回内容过大/);
   assert.equal(cancelled, true);
 });
 

@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "YouTube Digest 学习开发版",
-  "version": "1.4.0",
+  "name": "视频英语学习开发版",
+  "version": "1.5.0",
   "minimum_chrome_version": "116",
-  "description": "Turn YouTube videos into learning resources with transcripts, bilingual translation, AI overviews, and notes.",
+  "description": "支持哔哩哔哩与 YouTube：双语字幕、词句收藏、专注计时、复习和 Word 讲义。",
   "permissions": [
     "sidePanel",
     "storage",
@@ -13,10 +13,13 @@
   "host_permissions": [
     "https://www.youtube.com/*",
     "https://api.supadata.ai/*",
-    "https://api.deepseek.com/*"
+    "https://api.deepseek.com/*",
+    "https://www.bilibili.com/*",
+    "https://api.bilibili.com/*",
+    "https://*.hdslb.com/*"
   ],
   "action": {
-    "default_title": "Open YouTube Digest",
+    "default_title": "打开英语学习侧栏",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",
@@ -39,7 +42,19 @@
         "https://www.youtube.com/*"
       ],
       "js": [
+        "lib/platform.js",
         "content.js",
+        "lib/study-content.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.bilibili.com/*"
+      ],
+      "js": [
+        "lib/platform.js",
+        "lib/bilibili-content.js",
         "lib/study-content.js"
       ],
       "run_at": "document_idle"

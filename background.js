@@ -13,7 +13,7 @@
 
 // Import safe defaults and validation helpers. Secret keys live in
 // chrome.storage.local and are never part of the extension source.
-importScripts("settings.js");
+importScripts("lib/platform.js", "settings.js", "lib/wbi.js", "lib/bili-api.js", "lib/bilibili-transcript.js");
 
 const DEBUG = false;
 const AI_PROVIDER_IDLE_TIMEOUT_MS = 50_000;
@@ -87,7 +87,7 @@ async function requestAiCompletion({
   const settings = await getSettings();
   if (!settings.aiApiKey) {
     const error = new Error(
-      "DeepSeek API key not configured. Open YouTube Digest Settings.",
+      "请在学习设置中填写 DeepSeek API 密钥。",
     );
     error.code = "NO_AI_KEY";
     throw error;
@@ -157,7 +157,7 @@ async function requestAiCompletion({
 
     const text = data.choices?.[0]?.message?.content;
     if (typeof text !== "string" || !text.trim()) {
-      const error = new Error("DeepSeek returned an empty response.");
+      const error = new Error("DeepSeek 返回了空内容，请重试。");
       error.code = "EMPTY_AI_RESPONSE";
       throw error;
     }
@@ -166,14 +166,14 @@ async function requestAiCompletion({
   } catch (error) {
     if (timeoutKind === "idle") {
       const timeoutError = new Error(
-        "DeepSeek request was inactive for 50 seconds. Please Retry.",
+        "DeepSeek 已超过 50 秒没有响应，请重试。",
       );
       timeoutError.code = "AI_IDLE_TIMEOUT";
       throw timeoutError;
     }
     if (timeoutKind === "hard") {
       const timeoutError = new Error(
-        "DeepSeek request exceeded the 120-second limit. Please Retry.",
+        "DeepSeek 请求超过 120 秒，请重试。",
       );
       timeoutError.code = "AI_HARD_TIMEOUT";
       throw timeoutError;
@@ -274,6 +274,7 @@ chrome.runtime.onInstalled.addListener(({ reason }) => {
  * visible when switching to an already-loaded non-YouTube tab.
  */
 function isYouTubeTabUrl(url) {
+  if(globalThis.YTD_PLATFORM)return YTD_PLATFORM.supported(url);
   try {
     const parsed = new URL(url);
     return (
@@ -623,7 +624,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           debugLog("[YouTube Digest BG] No active YouTube tab found");
           sendResponse({
             success: false,
-            error: "No active YouTube tab found",
+            error: "请先切换到哔哩哔哩或 YouTube 视频页。",
           });
         }
       } catch (err) {
@@ -709,7 +710,7 @@ async function readSupadataJson(response) {
         receivedBytes += chunkBytes;
         if (receivedBytes > SUPADATA_MAX_RESPONSE_BYTES) {
           await reader.cancel().catch(() => {});
-          throw new Error("Supadata response is too large");
+          throw new Error("Supadata 返回内容过大");
         }
         text += decoder.decode(value, { stream: true });
       }
@@ -723,13 +724,13 @@ async function readSupadataJson(response) {
   } else if (typeof response.text === "function") {
     text = await response.text();
     if (new TextEncoder().encode(text).byteLength > SUPADATA_MAX_RESPONSE_BYTES) {
-      throw new Error("Supadata response is too large");
+      throw new Error("Supadata 返回内容过大");
     }
   } else if (typeof response.json === "function") {
     const value = await response.json();
     text = JSON.stringify(value);
     if (new TextEncoder().encode(text).byteLength > SUPADATA_MAX_RESPONSE_BYTES) {
-      throw new Error("Supadata response is too large");
+      throw new Error("Supadata 返回内容过大");
     }
   }
 
@@ -738,7 +739,7 @@ async function readSupadataJson(response) {
     return JSON.parse(text);
   } catch (error) {
     if (!response.ok) return {};
-    throw new Error("Supadata returned invalid JSON");
+    throw new Error("Supadata 返回格式无效");
   }
 }
 
@@ -757,7 +758,7 @@ async function fetchSupadataJson(url, options = {}) {
     return { response, data };
   } catch (error) {
     if (controller.signal.aborted) {
-      throw new Error("Supadata request timed out after 30 seconds");
+      throw new Error("Supadata 请求超过 30 秒，请重试");
     }
     throw error;
   } finally {
@@ -766,13 +767,14 @@ async function fetchSupadataJson(url, options = {}) {
 }
 
 async function handleFetchTranscript(videoId, mode = "native") {
+  if(globalThis.YTD_PLATFORM?.biliParts(videoId))return YTD_BILIBILI.fetchTranscript(videoId,{mode});
   try {
     const settings = await getSettings();
     if (!settings.supadataApiKey) {
       return {
         success: false,
         error: "NO_SUPADATA_KEY",
-        message: "Supadata API key not configured. Open YouTube Digest Settings.",
+        message: "请在学习设置中填写 Supadata 密钥。B 站字幕无需此密钥。",
       };
     }
 
@@ -811,7 +813,7 @@ async function handleFetchTranscript(videoId, mode = "native") {
       return {
         success: false,
         error: "NO_TRANSCRIPT",
-        message: "No native subtitle track is available for this video.",
+        message: "这个视频没有可读取的字幕轨。",
       };
     }
 
@@ -820,14 +822,14 @@ async function handleFetchTranscript(videoId, mode = "native") {
         return {
           success: false,
           error: "INVALID_SUPADATA_KEY",
-          message: "Your Supadata API key is invalid. Open YouTube Digest Settings.",
+          message: "Supadata 密钥无效，请检查学习设置。",
         };
       }
       if (response.status === 404) {
         return {
           success: false,
           error: "NO_TRANSCRIPT",
-          message: "No subtitles found for this video.",
+          message: "这个视频没有可用字幕。",
         };
       }
       if (response.status === 429) {
@@ -835,7 +837,7 @@ async function handleFetchTranscript(videoId, mode = "native") {
           success: false,
           error: "RATE_LIMITED",
           message:
-            "Supadata rate limit reached. Please wait a minute and try again.",
+            "Supadata 请求过于频繁，请稍后重试。",
         };
       }
       throw new Error(
@@ -887,7 +889,7 @@ async function handleFetchTranscript(videoId, mode = "native") {
         message:
           transcriptMode === "generate"
             ? "AI transcription completed, but no speech was detected in this video."
-            : "Supadata returned an empty transcript for this video.",
+            : "Supadata 返回的字幕为空。",
       };
     }
 
@@ -903,7 +905,7 @@ async function handleFetchTranscript(videoId, mode = "native") {
     console.error("Transcript fetch error:", error);
     return {
       success: false,
-      error: error.message || "Failed to fetch transcript",
+      error: error.message || "字幕获取失败",
     };
   }
 }
@@ -985,13 +987,13 @@ async function pollTranscriptJob(jobId, supadataApiKey, mode = "native") {
     }
 
     if (data.status === "failed") {
-      throw new Error("Transcript processing failed");
+      throw new Error("字幕处理失败。");
     }
 
     // Status is 'queued' or 'active' — keep polling
   }
 
-  throw new Error("Transcript processing timed out");
+  throw new Error("字幕处理超时，请重试。");
 }
 
 // ============================================================
@@ -1062,7 +1064,7 @@ async function handleAnalyzeTranscript(
       return {
         success: false,
         error: "NO_AI_KEY",
-        message: "DeepSeek API key not configured. Open YouTube Digest Settings.",
+        message: "请在学习设置中填写 DeepSeek API 密钥。",
       };
     }
 
@@ -1100,8 +1102,8 @@ async function handleAnalyzeTranscript(
       durationFormatted,
       lateThreshold,
       maxTimestampSeconds,
-      videoTitle: videoTitle || "Unknown",
-      channelName: channelName || "Unknown",
+      videoTitle: videoTitle || "未知",
+      channelName: channelName || "未知",
       videoDescription: videoDescription || "No description available",
       transcriptText,
     };
@@ -1143,19 +1145,19 @@ async function handleAnalyzeTranscript(
       return {
         success: false,
         error: "INVALID_AI_KEY",
-        message: "DeepSeek rejected the API key.",
+        message: "DeepSeek 密钥无效，请检查设置。",
       };
     }
     if (error.status === 429) {
       return {
         success: false,
         error: "RATE_LIMITED",
-        message: "DeepSeek rate-limited this request. Try again shortly.",
+        message: "DeepSeek 请求过于频繁，请稍后重试。",
       };
     }
     return {
       success: false,
-      error: error.message || "Failed to analyze transcript",
+      error: error.message || "概览解析失败",
     };
   }
 }
@@ -1276,7 +1278,7 @@ function buildOverviewQuoteNote(message, timestampedUrl, now = Date.now()) {
     typeof message?.noteText === "string"
       ? message.noteText.trim().slice(0, 6000)
       : "";
-  if (!noteText) throw new Error("Overview note text is required");
+  if (!noteText) throw new Error("笔记内容不能为空");
 
   const safeTimestamp = Math.max(
     0,
@@ -1296,7 +1298,7 @@ function buildOverviewQuoteNote(message, timestampedUrl, now = Date.now()) {
     videoTitle:
       typeof message?.videoTitle === "string"
         ? message.videoTitle.slice(0, 500)
-        : "Untitled Video",
+        : "未命名视频",
     channelName:
       typeof message?.channelName === "string"
         ? message.channelName.slice(0, 300)
@@ -1322,7 +1324,7 @@ async function handleSaveOverviewNote(message) {
       0,
       Math.floor(Number(message?.timestamp) || 0),
     );
-    const timestampedUrl = `${YTD_SETTINGS.canonicalYouTubeUrl(videoId)}&t=${safeTimestamp}s`;
+    const timestampedUrl = (globalThis.YTD_PLATFORM?.sourceUrl(videoId,safeTimestamp) || `${YTD_SETTINGS.canonicalYouTubeUrl(videoId)}&t=${safeTimestamp}s`);
     const note = buildOverviewQuoteNote(message, timestampedUrl);
     await saveNoteToStorage(note);
     chrome.runtime.sendMessage({ action: "noteSaved", note }).catch(() => {});
@@ -1366,7 +1368,7 @@ async function handleSaveNote(
     if (!transcript) {
       const transcriptResult = await handleFetchTranscript(videoId);
       if (!transcriptResult.success) {
-        return { success: false, error: "Could not fetch transcript" };
+        return { success: false, error: "字幕获取失败。" };
       }
       transcript = transcriptResult.transcript;
     }
@@ -1452,7 +1454,7 @@ async function handleSaveNote(
     const formattedTimestamp = `${minutes}:${String(seconds).padStart(2, "0")}`;
 
     // Create timestamped URL
-    const timestampedUrl = `${canonicalVideoUrl}&t=${safeTimestamp}s`;
+    const timestampedUrl = globalThis.YTD_PLATFORM?.sourceUrl(videoId,safeTimestamp) || `${canonicalVideoUrl}&t=${safeTimestamp}s`;
 
     // Create the note object
     const note = {
@@ -1461,7 +1463,7 @@ async function handleSaveNote(
       videoTitle:
         typeof videoTitle === "string"
           ? videoTitle.slice(0, 500)
-          : "Untitled Video",
+          : "未命名视频",
       channelName:
         typeof channelName === "string" ? channelName.slice(0, 300) : "",
       timestamp: formattedTimestamp,
@@ -1506,7 +1508,7 @@ async function cleanupNoteText(
   try {
     debugLog("[YouTube Digest] Requesting note cleanup");
     const variables = {
-      videoTitle: videoTitle || "Unknown",
+      videoTitle: videoTitle || "未知",
       fullContext,
       beforeText: beforeText || "(none)",
       targetText,
@@ -1647,20 +1649,20 @@ function normalizeVocabularyTerm(value) {
   if (typeof value !== "string") {
     throw vocabularyError(
       "VOCABULARY_INVALID_TERM",
-      "Vocabulary text is required.",
+      "请先选择要收藏的词句。",
     );
   }
   const term = value.normalize("NFKC").replace(/\s+/gu, " ").trim();
   if (!term) {
     throw vocabularyError(
       "VOCABULARY_INVALID_TERM",
-      "Vocabulary text is required.",
+      "请先选择要收藏的词句。",
     );
   }
   if (term.length > VOCABULARY_MAX_TERM_CHARS) {
     throw vocabularyError(
       "VOCABULARY_INVALID_TERM",
-      "Vocabulary text cannot exceed 1,000 characters.",
+      "词条不能超过 1,000 个字符。",
     );
   }
 
@@ -1680,7 +1682,7 @@ function validateVocabularyEnrichment(value, selectedTerm = "") {
     if (value.length > 10_000) {
       throw vocabularyError(
         "VOCABULARY_INVALID_RESPONSE",
-        "Vocabulary response is too large.",
+        "词义解析内容过长，请重试。",
       );
     }
     try {
@@ -1688,7 +1690,7 @@ function validateVocabularyEnrichment(value, selectedTerm = "") {
     } catch (error) {
       throw vocabularyError(
         "VOCABULARY_INVALID_RESPONSE",
-        `Invalid vocabulary JSON: ${error.message}`,
+        `词义解析格式错误：${error.message}`,
       );
     }
   }
@@ -1701,19 +1703,19 @@ function validateVocabularyEnrichment(value, selectedTerm = "") {
     if (!fieldValue) {
       throw vocabularyError(
         "VOCABULARY_INVALID_RESPONSE",
-        `Vocabulary ${fieldName} is required.`,
+        `词义解析缺少 ${fieldName}。`,
       );
     }
     if (fieldValue.length > maxLength) {
       throw vocabularyError(
         "VOCABULARY_INVALID_RESPONSE",
-        `Vocabulary ${fieldName} cannot exceed ${maxLength.toLocaleString("en-US")} characters.`,
+        `词义解析 ${fieldName} 不能超过 ${maxLength.toLocaleString("en-US")} 个字符。`,
       );
     }
     if (/<\/?[a-z][^>]*>/iu.test(fieldValue)) {
       throw vocabularyError(
         "VOCABULARY_INVALID_RESPONSE",
-        `Vocabulary ${fieldName} must be plain text, not HTML.`,
+        `词义解析 ${fieldName} 必须是纯文本，不能包含 HTML。`,
       );
     }
     return fieldValue;
@@ -1724,20 +1726,20 @@ function validateVocabularyEnrichment(value, selectedTerm = "") {
     if (typeof parsed.phonetic !== "string") {
       throw vocabularyError(
         "VOCABULARY_INVALID_RESPONSE",
-        "Vocabulary phonetic must be plain text.",
+        "音标必须是纯文本。",
       );
     }
     phonetic = parsed.phonetic.normalize("NFKC").trim();
     if (phonetic.length > 160) {
       throw vocabularyError(
         "VOCABULARY_INVALID_RESPONSE",
-        "Vocabulary phonetic cannot exceed 160 characters.",
+        "音标不能超过 160 个字符。",
       );
     }
     if (/[<>]/u.test(phonetic)) {
       throw vocabularyError(
         "VOCABULARY_INVALID_RESPONSE",
-        "Vocabulary phonetic must be plain text, not markup.",
+        "音标不能包含标记代码。",
       );
     }
   }
@@ -1779,7 +1781,7 @@ function buildVocabularyEntry(
   if (!/^[A-Za-z0-9_-]{1,100}$/.test(videoId)) {
     throw vocabularyError(
       "VOCABULARY_INVALID_VIDEO",
-      "A valid YouTube video ID is required.",
+      "无法识别来源视频，请重新打开视频页。",
     );
   }
 
@@ -1791,7 +1793,7 @@ function buildVocabularyEntry(
   ) {
     throw vocabularyError(
       "VOCABULARY_INVALID_TIMESTAMP",
-      "Vocabulary timestamp is invalid.",
+      "收藏时间点无效。",
     );
   }
   const timestampSeconds = Math.floor(timestampNumber);
@@ -1806,7 +1808,7 @@ function buildVocabularyEntry(
   if (!Number.isFinite(createdAtNumber) || createdAtNumber < 0) {
     throw vocabularyError(
       "VOCABULARY_INVALID_ENTRY",
-      "Vocabulary creation time is invalid.",
+      "收藏创建时间无效。",
     );
   }
   const createdAt = Math.floor(createdAtNumber);
@@ -1815,7 +1817,7 @@ function buildVocabularyEntry(
   if (!/^[A-Za-z0-9_-]{1,200}$/.test(id)) {
     throw vocabularyError(
       "VOCABULARY_INVALID_ENTRY",
-      "Vocabulary ID is invalid.",
+      "词条编号无效。",
     );
   }
 
@@ -1830,11 +1832,11 @@ function buildVocabularyEntry(
     sourceExcerpt: safeText(message?.sourceExcerpt, 3_000, normalized.term),
     context: safeText(message?.context, 12_000),
     videoId,
-    videoTitle: safeText(message?.videoTitle, 500, "Untitled Video"),
+    videoTitle: safeText(message?.videoTitle, 500, "未命名视频"),
     channelName: safeText(message?.channelName, 300),
     timestamp: `${minutes}:${String(seconds).padStart(2, "0")}`,
     timestampSeconds,
-    timestampedUrl: `https://www.youtube.com/watch?v=${videoId}&t=${timestampSeconds}s`,
+    timestampedUrl: globalThis.YTD_PLATFORM?.sourceUrl(videoId,timestampSeconds) || `https://www.youtube.com/watch?v=${videoId}&t=${timestampSeconds}s`,
     createdAt,
   };
 }
@@ -1904,7 +1906,7 @@ async function saveVocabularyMutation(message) {
       return {
         success: false,
         error: "VOCABULARY_CAPACITY",
-        message: "Vocabulary is full. Delete an entry before saving more (maximum 500).",
+        message: "单词库已满（500 条），请先删除部分词条。",
       };
     }
 
@@ -1927,7 +1929,7 @@ async function saveVocabularyMutation(message) {
       videoTitleJson: JSON.stringify(
         typeof message?.videoTitle === "string"
           ? message.videoTitle.slice(0, 500)
-          : "Untitled Video",
+          : "未命名视频",
       ),
     };
     const systemPrompt = await loadPromptSection(
@@ -1970,7 +1972,7 @@ async function saveVocabularyMutation(message) {
       return {
         success: false,
         error: "VOCABULARY_CAPACITY",
-        message: "Vocabulary is full. Delete an entry before saving more (maximum 500).",
+        message: "单词库已满（500 条），请先删除部分词条。",
       };
     }
 
@@ -2015,7 +2017,7 @@ async function getVocabulary(videoId) {
     if (requestedVideoId && !/^[A-Za-z0-9_-]{1,100}$/.test(requestedVideoId)) {
       throw vocabularyError(
         "VOCABULARY_INVALID_VIDEO",
-        "Vocabulary video filter is invalid.",
+        "视频筛选条件无效。",
       );
     }
     let vocabulary = await readValidVocabulary();
@@ -2044,7 +2046,7 @@ async function deleteVocabularyMutation(vocabularyId) {
     ) {
       throw vocabularyError(
         "VOCABULARY_INVALID_ID",
-        "Vocabulary ID is invalid.",
+        "词条编号无效。",
       );
     }
     const stored = await chrome.storage.local.get(VOCABULARY_STORAGE_KEY);
@@ -2088,13 +2090,13 @@ async function handleExplainSelection(
       return {
         success: false,
         error: "NO_AI_KEY",
-        message: "DeepSeek API key not configured.",
+        message: "请先在设置中填写 DeepSeek API 密钥。",
       };
     }
 
     const variables = {
       explainPayload: JSON.stringify({
-        videoTitle: videoTitle || "Unknown",
+        videoTitle: videoTitle || "未知",
         selectedText,
         transcriptContext: transcriptContext || "None",
       }),
@@ -2127,7 +2129,7 @@ async function handleExplainSelection(
     console.error("Explain selection error:", error);
     return {
       success: false,
-      error: error.message || "Failed to explain selection",
+      error: error.message || "词句解释失败",
     };
   }
 }
@@ -2154,7 +2156,7 @@ async function getTranslationBaseRules(targetLanguage) {
 function validateTranscriptBatchRequest(content) {
   const segments = content?.segments;
   if (!Array.isArray(segments) || segments.length < 1 || segments.length > 4) {
-    throw new Error("Transcript translation requires 1 to 4 segments");
+    throw new Error("每次翻译需要 1 至 4 段字幕");
   }
 
   const seenIds = new Set();
@@ -2163,17 +2165,17 @@ function validateTranscriptBatchRequest(content) {
     const id = typeof segment?.id === "string" ? segment.id.trim() : "";
     const text = typeof segment?.text === "string" ? segment.text.trim() : "";
     if (!/^[A-Za-z0-9:_-]{1,128}$/.test(id) || seenIds.has(id)) {
-      throw new Error("Transcript translation segment IDs must be unique and stable");
+      throw new Error("字幕段落编号重复或无效");
     }
     if (!text || text.length > 4000) {
-      throw new Error("Transcript translation segment text is invalid or too long");
+      throw new Error("字幕内容无效或过长");
     }
     seenIds.add(id);
     totalCharacters += text.length;
     return { id, text };
   });
   if (totalCharacters > 12000) {
-    throw new Error("Transcript translation batch is too large");
+    throw new Error("本次翻译内容过多");
   }
   return normalized;
 }
@@ -2215,7 +2217,7 @@ function normalizeTranslatedSegmentBatch(parsed, sourceSegments) {
       text: translatedById.get(source.id) || "",
       error: translatedById.has(source.id)
         ? ""
-        : "Missing or invalid Chinese translation",
+        : "中文翻译缺失或无效",
     })),
   };
 }
@@ -2254,14 +2256,14 @@ async function handleTranslateContent(
 
     const settings = await getSettings();
     if (!settings.aiApiKey) {
-      return { success: false, error: "DeepSeek API key not configured" };
+      return { success: false, error: "请先在设置中填写 DeepSeek API 密钥。" };
     }
 
     const sourceSegments = validateTranscriptBatchRequest(content);
     if (contentType === "explainBatch" && sourceSegments.length !== 1) {
       return {
         success: false,
-        error: "Explanation translation requires exactly one segment",
+        error: "解释翻译需要一段文本",
       };
     }
     const langName = "Simplified Chinese";
@@ -2277,7 +2279,7 @@ async function handleTranslateContent(
       promptSection,
       {
         langName,
-        videoTitle: videoTitle || "Unknown",
+        videoTitle: videoTitle || "未知",
         baseRules,
       },
     );
@@ -2308,13 +2310,13 @@ async function handleTranslateContent(
     if (!aligned.segments.some((segment) => segment.text)) {
       return {
         success: false,
-        error: "Translation returned no valid Chinese segments",
+        error: "未返回有效的中文翻译",
       };
     }
     return { success: true, translatedContent: aligned };
   } catch (error) {
     console.error("[YouTube Digest] Translation error:", error);
-    return { success: false, error: error.message || "Translation failed" };
+    return { success: false, error: error.message || "翻译失败，请重试。" };
   }
 }
 
@@ -2347,7 +2349,7 @@ async function callAiTranslation(
     if (error.status === 429) {
       return {
         success: false,
-        error: "Rate limited — try again in a moment",
+        error: "请求过于频繁，请稍后重试。",
         code: "RATE_LIMITED",
       };
     }

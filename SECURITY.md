@@ -9,3 +9,7 @@ New learning APIs accept calls only from extension pages. Content-script study p
 The first native lookup never starts audio generation. Only explicit confirmation may invoke Supadata generation. Hover calls DeepSeek after a dwell; it does not save automatically. Failed enrichment does not create fictional answers. No Ask or external search request handlers or search host permissions are included.
 
 Word uses a bundled library and explicit field allowlist. No remote executable scripts, dynamic provider endpoints or credential-bearing export payloads are added. Source timestamps are canonical YouTube links. Run npm test, npm run check and npm run package after changes, and separately test the unpacked extension in an isolated Chrome profile. Automated tests must not make paid provider calls.
+
+## Bilibili adapter (1.5.0)
+
+Canonical BV and part identities are validated centrally. Native caption requests are bounded to 30 seconds and 8 MiB, require HTTPS, and allow only api.bilibili.com or hdslb.com subdomains. Redirects are rejected. Bilibili login cookies stay with the site API; captions CDN and AI services never receive them. Login/risk-control failures are displayed; no access controls are bypassed.

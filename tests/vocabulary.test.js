@@ -241,7 +241,7 @@ test("normalizeVocabularyTerm uses NFKC, collapses whitespace, and rejects inval
     "other",
   );
 
-  assert.throws(() => helpers.normalizeVocabularyTerm(" \n "), /required/i);
+  assert.throws(() => helpers.normalizeVocabularyTerm(" \n "), /请选择|请先选择|缺少/);
   assert.equal(helpers.normalizeVocabularyTerm("x".repeat(1000)).term.length, 1000);
   assert.throws(
     () => helpers.normalizeVocabularyTerm("x".repeat(1001)),
@@ -308,7 +308,7 @@ test("validateVocabularyEnrichment rebuilds a bounded plain-text schema", () => 
         explanationZh: "解释",
         phonetic: "<script>",
       }),
-    /plain text|phonetic/i,
+    /纯文本|音标/,
   );
   assert.throws(
     () =>
@@ -363,7 +363,7 @@ test("validateVocabularyEnrichment rebuilds a bounded plain-text schema", () => 
   );
   assert.throws(
     () => helpers.validateVocabularyEnrichment("x".repeat(10_001)),
-    /too large/i,
+    /内容过长/,
   );
 });
 
@@ -407,7 +407,7 @@ test("buildVocabularyEntry bounds metadata and creates one canonical timestamp U
         validSave({ videoId: "bad&id=attacker" }),
         { meaningZh: "含义", explanationZh: "解释" },
       ),
-    /video ID/i,
+    /来源视频/,
   );
 
   const unsupportedEntry = helpers.buildVocabularyEntry(
@@ -753,10 +753,10 @@ test("Vocabulary rendering, deletion, and highlighting keep untrusted text out o
   assert.match(source, /action:\s*"getVocabulary"/);
   assert.match(source, /action:\s*"saveVocabulary"/);
   assert.match(source, /vocabularySavePromises/);
-  assert.match(source, /Saving…/);
-  assert.match(source, /Already saved/);
+  assert.match(source, /正在保存…/);
+  assert.match(source, /已收藏/);
   assert.match(source, /Saved/);
-  assert.match(source, /Could not save/);
+  assert.match(source, /收藏失败/);
 
   assert.ok(plannerStart >= 0 && plannerEnd > plannerStart);
   assert.doesNotMatch(plannerSource, /new RegExp|RegExp\(/);
@@ -818,7 +818,7 @@ test("Vocabulary cards render phonetics as text and visibly explain unavailable 
   assert.match(source, /setAttribute\("fill",\s*"none"\)/);
   assert.match(source, /setAttribute\("aria-hidden",\s*"true"\)/);
   assert.match(renderSource, /className\s*=\s*"vocabulary-pronunciation-unavailable"/);
-  assert.match(renderSource, /textContent\s*=\s*"Pronunciation unavailable"/);
+  assert.match(renderSource, /textContent\s*=\s*"暂无可用发音"/);
   assert.doesNotMatch(renderSource, /pronunciationButton\.disabled\s*=\s*true/);
   assert.match(renderSource, /preventDefault\(\)/);
   assert.match(renderSource, /stopPropagation\(\)/);

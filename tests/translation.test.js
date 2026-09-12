@@ -168,13 +168,13 @@ const nextTurn = () => new Promise((resolve) => setImmediate(resolve));
 test("Transcript header exposes and wires Original, Chinese, and bilingual modes", () => {
   const html = read("sidepanel.html");
   const js = read("sidepanel.js");
-  assert.match(html, /data-transcript-mode="original"[\s\S]*?>Original</);
+  assert.match(html, /data-transcript-mode="original"[\s\S]*?>原文</);
   assert.match(html, /data-transcript-mode="zh"[\s\S]*?>\u4e2d\u6587</);
   assert.match(html, /data-transcript-mode="bilingual"[\s\S]*?>\u53cc\u8bed</);
   assert.match(js, /handleTranscriptModeChange\(button\.dataset\.transcriptMode\)/);
   assert.match(js, /contentType: "transcriptBatch"/);
   assert.doesNotMatch(js, /English \+ Chinese/);
-  assert.match(js, /Original \(\$\{language\}\)/);
+  assert.match(js, /原文（\$\{language\}）/);
 });
 
 test("Overview adds a full summary, matching language modes, and sticky controls", () => {
@@ -184,7 +184,7 @@ test("Overview adds a full summary, matching language modes, and sticky controls
   const analysisPrompt = read("prompts/analysis.md");
 
   assert.match(html, /id="overviewSummary"/);
-  assert.match(html, /data-overview-mode="original"[\s\S]*?>Original</);
+  assert.match(html, /data-overview-mode="original"[\s\S]*?>原文</);
   assert.match(html, /data-overview-mode="zh"[\s\S]*?>\u4e2d\u6587</);
   assert.match(html, /data-overview-mode="bilingual"[\s\S]*?>\u53cc\u8bed</);
   assert.match(
@@ -248,7 +248,7 @@ test("Overview notes save the currently displayed language", () => {
   );
   assert.match(
     panel,
-    /quoteTranslationReady[\s\S]*?disabled[\s\S]*?Translating…/,
+    /quoteTranslationReady[\s\S]*?disabled[\s\S]*?正在翻译…/,
   );
   assert.match(background, /message\.action === "saveOverviewNote"/);
   assert.doesNotMatch(
@@ -311,11 +311,11 @@ test("audio transcription stays native by default and requires explicit generati
   );
   assert.match(
     buildAudioTranscriptionConfirmation(30 * 60),
-    /30 minutes[\s\S]*60 Supadata credits/,
+    /30 分钟[\s\S]*60 个 Supadata 额度/,
   );
   assert.match(
     buildAudioTranscriptionConfirmation(0),
-    /2 credits per video minute/,
+    /每分钟约使用 2 个额度/,
   );
 });
 
@@ -395,7 +395,7 @@ test("structured translation batches align by stable ID and expose missing fallb
   );
   assert.equal(aligned[0].id, source[0].id);
   assert.equal(aligned[0].text, "");
-  assert.match(aligned[0].error, /unavailable/i);
+  assert.match(aligned[0].error, /不可用|unavailable/i);
   assert.equal(aligned[1].text, "\u7b2c\u4e8c\u4e2a\u5b8c\u6574\u53e5\u5b50\u3002");
 });
 
@@ -430,7 +430,7 @@ test("Explain exposes English, Chinese, and bilingual display helpers", () => {
     buildExplainContextFromSelection,
   } = loadSidepanelHelpers();
 
-  assert.match(html, /data-explain-mode="english"[\s\S]*?>English</);
+  assert.match(html, /data-explain-mode="english"[\s\S]*?>英文</);
   assert.match(html, /data-explain-mode="zh"[\s\S]*?>中文</);
   assert.match(html, /data-explain-mode="bilingual"[\s\S]*?>双语</);
   assert.match(html, /contentType: "explainBatch"/);
@@ -459,7 +459,7 @@ test("Explain exposes English, Chinese, and bilingual display helpers", () => {
     "zh",
     "English fallback",
     "",
-    "Translation failed.",
+    "翻译失败，请重试。",
   );
 
   assert.match(english, /Explain &lt;b&gt;this&lt;\/b&gt; briefly\./);
@@ -470,8 +470,8 @@ test("Explain exposes English, Chinese, and bilingual display helpers", () => {
   assert.match(bilingual, /explain-translation/);
   assert.match(bilingual, /Explain &lt;b&gt;this&lt;\/b&gt; briefly\./);
   assert.match(bilingual, /用中文解释/);
-  assert.match(failedChinese, /Translation failed\./);
-  assert.match(failedChinese, />Retry</);
+  assert.match(failedChinese, /翻译失败，请重试。/);
+  assert.match(failedChinese, />重试</);
 
   const context = buildExplainContextFromSelection(
     "中文片段",
@@ -573,7 +573,7 @@ test("Explain translation is lazy, cached, retryable, and ignores late replies",
     retryState.translationError,
   );
   assert.match(failed, /Keep this English\./);
-  assert.match(failed, />Retry</);
+  assert.match(failed, />重试</);
   await ensureExplanationTranslation(retryState, {
     sendMessage: retrySend,
     isCurrent: () => true,
@@ -680,7 +680,7 @@ test("background accepts explanation batches and rejects unknown translation typ
   assert.match(source, /targetLanguage !== "zh"/);
   assert.throws(
     () => validateTranscriptBatchRequest({ segments: [] }),
-    /1 to 4 segments/,
+    /1 至 4 段字幕/,
   );
   assert.throws(
     () =>
@@ -690,7 +690,7 @@ test("background accepts explanation batches and rejects unknown translation typ
           { id: "duplicate", text: "second" },
         ],
       }),
-    /unique and stable/,
+    /段落编号重复或无效/,
   );
 
   const helpers = loadBackgroundHelpers({
@@ -830,7 +830,7 @@ test("provider idle silence aborts with a distinct Retry-able error", async () =
   const result = await request;
   assert.equal(result.success, false);
   assert.equal(result.code, "AI_IDLE_TIMEOUT");
-  assert.match(result.error, /inactive for 50 seconds.*Retry/i);
+  assert.match(result.error, /超过 50 秒没有响应，请重试/);
   assert.equal(timers.activeCount(120_000), 0);
 });
 
@@ -874,7 +874,7 @@ test("blank-line keepalives cannot evade the provider hard cap", async () => {
   const result = await request;
   assert.equal(result.success, false);
   assert.equal(result.code, "AI_HARD_TIMEOUT");
-  assert.match(result.error, /120-second limit.*Retry/i);
+  assert.match(result.error, /超过 120 秒，请重试/);
   assert.equal(timers.activeCount(50_000), 0);
 });
 
@@ -962,7 +962,7 @@ test("translation message watchdog rejects, clears its timer, and ignores late r
   });
   assert.equal(timeoutDelay, 130_000);
   timeoutCallback();
-  await assert.rejects(request, /timed out after 130 seconds.*Retry/i);
+  await assert.rejects(request, /翻译请求超时，请重试。/);
   assert.equal(clearCount, 1);
 
   resolveMessage({ success: true });

@@ -227,16 +227,16 @@ test("clearing Transcript search marks preserves vocabulary and inline markup", 
 test("Transcript search exposes labelled bounded controls and live result count", () => {
   assert.match(
     html,
-    /<label[^>]*for="transcriptSearchInput"[^>]*>\s*Search transcript\s*<\/label>/,
+    /<label[^>]*for="transcriptSearchInput"[^>]*>\s*搜索字幕\s*<\/label>/,
   );
   assert.match(
     html,
     /<input[^>]*id="transcriptSearchInput"[^>]*type="search"[^>]*maxlength="200"/,
   );
-  assert.match(html, /id="transcriptSearchClear"[^>]*aria-label="Clear transcript search"/);
+  assert.match(html, /id="transcriptSearchClear"[^>]*aria-label="清空字幕搜索"/);
   assert.match(html, /id="transcriptSearchCount"[^>]*aria-live="polite"/);
-  assert.match(html, /id="transcriptSearchPrevious"[^>]*aria-label="Previous search result"/);
-  assert.match(html, /id="transcriptSearchNext"[^>]*aria-label="Next search result"/);
+  assert.match(html, /id="transcriptSearchPrevious"[^>]*aria-label="上一条搜索结果"/);
+  assert.match(html, /id="transcriptSearchNext"[^>]*aria-label="下一条搜索结果"/);
 });
 
 test("Transcript search hides Chrome's native cancel button behind the custom clear control", () => {

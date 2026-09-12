@@ -47,6 +47,7 @@ var YTD_SETTINGS = (() => {
   }
 
   function canonicalYouTubeUrl(videoId) {
+    if(globalThis.YTD_PLATFORM)return YTD_PLATFORM.sourceUrl(videoId);
     const normalized = String(videoId || "").trim();
     if (!/^[A-Za-z0-9_-]{6,20}$/.test(normalized)) {
       throw new Error("Invalid YouTube video ID.");

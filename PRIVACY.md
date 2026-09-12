@@ -1,25 +1,17 @@
-# Privacy
+# 隐私说明 · 视频英语学习开发版
 
-This development extension has no developer-operated server, accounts, analytics or telemetry.
+版本 1.5.0。扩展没有开发者服务器、统计追踪、账号系统或云同步。
 
-## Network requests
+## 哔哩哔哩
 
-Supadata receives a canonical YouTube watch URL for native subtitles. Audio transcription is requested only after the user explicitly confirms generation when native subtitles are unavailable. DeepSeek receives bounded transcript/context data for translation, Overview, explanations, note cleanup, hover vocabulary lookup and sentence analysis. Keys are sent only to their configured fixed provider endpoints. Hover lookup is automatic after 600 ms of dwell, but saving is explicit. Up to two word lookups and two sentence analyses can be in flight. Successful word/context results stay in worker memory for at most 30 minutes, at most 200 entries.
+读取当前视频的 BV 号和分 P，向 api.bilibili.com 请求视频信息与可用字幕；这些请求会携带当前浏览器配置已有的 B 站登录 Cookie。扩展不读取、保存或导出 Cookie 值。字幕只从 HTTPS 的 hdslb.com 子域下载，字幕 CDN 请求不携带 Cookie。没有字幕或需要登录时明确提示，不绕过访问限制，不自动转写 B 站音频。
 
-Ask and external web search are not available. Old search credentials and suggestion-cache fields are removed at startup. No learning records are uploaded for Study, self-assessment or Word generation.
+## AI 与 YouTube 服务
 
-## Local data
+YouTube 字幕使用用户自己的 Supadata 密钥，优先原生字幕，生成音频字幕需要另行确认。悬停英文达到 600 毫秒、请求翻译／解析／概览／笔记整理时，向 DeepSeek 发送相应字幕、所选词句和视频上下文。密钥仅保存在当前 Chrome 用户配置；不会写入 Word、源码或日志。
 
-Chrome local extension storage holds settings and keys, existing Notes and Vocabulary, a separate sentence collection, grammar/expression labels, review self-assessments, UI preferences and study sessions. The daily-use extension and other Chrome profiles are independent. Existing Vocabulary is not automatically reclassified. Both vocabulary and sentences have a 500-entry cap without silent eviction. Storage failures are reported; a source sentence is written before an analysis request.
+## 本地学习资料
 
-Study records a bound video/tab, target duration/goals, distinct new collection IDs, accumulated foreground viewing/activity/review time and daily buckets. Watching and activity are mutually exclusive. Hidden pages, unfocused windows, buffering, seeks, interrupted heartbeats, worker restarts and offline intervals do not earn offline credit. Recent interaction is an activity heuristic, not proof of attention or learning. History is retained for 90 days and shown for seven local calendar days. A selected current session is retained until replaced so its summary remains available.
+字幕缓存、单词、长难句、笔记、复习自评、学习会话和偏好保存在本机。学习计时记录观看、字幕操作和复习行为，不代表注意力或学习成绩。学习历史保留 90 天，最近 7 天统计在学习页展示。Word 和翻卡复习在本地完成，不上传文档内容。
 
-Chrome `storage.session` stores Transcript reading positions for up to 20 videos; these are removed when the browser session ends. Transcript search is local, literal, bounded and does not seek the video. Recent digest/translation caching follows the existing 20-video and 30-day policy.
-
-API keys and collections are restricted to trusted extension contexts. Content scripts receive only study-control state and cannot request collection APIs. Pronunciation uses local Chrome/system voices; no audio is uploaded. Reduce distractions changes the current page while enabled and removes its own styles on exit; it does not change YouTube account autoplay preferences.
-
-## Exports and deletion
-
-The bundled docx 9.6.1 library creates Word files entirely on-device, including chosen words/sentences, explanations, source video titles/timestamps/links and printable exercises. Export uses an explicit field allowlist and never includes settings or API keys. Word files are independent copies: removing an entry from the extension does not remove downloaded documents.
-
-Delete individual vocabulary/sentences from Library. Settings offers cache deletion, note deletion and reset of all extension data, including keys and learning records. Uninstalling the extension removes its storage. No automatic cloud backup or multi-device synchronization is provided.
+可在收藏库删除条目，在设置中清理字幕缓存、删除笔记或重置全部数据。重置会删除全部密钥和学习资料。不同 Chrome 用户配置或不同扩展安装不自动共享数据。

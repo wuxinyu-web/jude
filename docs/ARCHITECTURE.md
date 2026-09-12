@@ -35,3 +35,9 @@ Existing search stays literal, bounded and independent of Vocabulary highlightin
 ## Validation
 
 Node tests cover existing behavior, sentence/cache/storage races, mode transitions/time gaps, filtering, and DOCX XML. scripts/browser-test.cjs loads the real extension into an isolated browser profile with synthetic caption/provider fixtures. It makes no paid calls. Real YouTube/player/provider account checks remain a separate manual verification step. Never include test fixture profiles, screenshots or personal exports in the release ZIP.
+
+## Multi-platform interface (1.5.0)
+
+`lib/platform.js` owns video parsing and canonical source URLs. Existing YouTube IDs remain unchanged; a Bilibili key uses BV plus `_pN` for a non-first part. `bilibili-content.js` reads the native player, mounts controls outside its framework-owned video container, and speaks the same relay protocol. `bilibili-transcript.js` adapts WBI-signed native subtitle metadata and bounded CDN captions to the existing transcript pipeline. API/WBI primitives are reused under the included MIT license.
+
+Content playback heartbeats run each second; side-panel rendering polls every 500 ms so saved second changes are visible without inventing time. The toolbar follow toggle and periodic relay retain video/generation checks and explicitly recenter even if the active row did not change. UI strings are translated in source, leaving original subtitles, tags and user data untouched.

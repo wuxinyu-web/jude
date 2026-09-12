@@ -1,7 +1,8 @@
 /* Real extension integration test. Synthetic page, captions and AI only. */
 const {chromium}=require('playwright');
 const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),assert=require('node:assert/strict');
-const root=path.resolve(__dirname,'..'),out=path.resolve(process.env.YTD_TEST_OUTPUT||path.join(root,'test-results'));
+const root=path.resolve(process.env.YTD_EXTENSION_DIR||path.join(__dirname,'..')),out=path.resolve(process.env.YTD_TEST_OUTPUT||path.join(root,'test-results'));
+const bili=process.env.YTD_TEST_PLATFORM==='bilibili',fixtureId=bili?'BV1xx411c7mD_p2':'abcDEF12345';
 fs.mkdirSync(out,{recursive:true});
 const profile=fs.mkdtempSync(path.join(os.tmpdir(),'ytd-study-browser-'));
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -15,7 +16,7 @@ function attachClient(rootSession,sessionId){
   });
   const send=(method,params={})=>new Promise((resolve,reject)=>{const id=++seq,timer=setTimeout(()=>{pending.delete(id);reject(new Error(`CDP timeout ${method}`));},15000);pending.set(id,{resolve,reject,timer});rootSession.send('Target.sendMessageToTarget',{sessionId,message:JSON.stringify({id,method,params})}).catch(reject);});
   const evaluate=async(fn,arg)=>{const r=await send('Runtime.evaluate',{expression:`(${fn.toString()})(${JSON.stringify(arg)??'undefined'})`,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw new Error(r.exceptionDetails.exception?.description||r.exceptionDetails.text);return r.result?.value;};
-  const click=async(selector,text)=>{const point=await evaluate(({selector,text})=>{const e=[...document.querySelectorAll(selector)].find(e=>!text||e.textContent.trim()===text);if(!e)throw new Error(`Missing ${selector} ${text||''}`);e.scrollIntoView({block:'center'});const r=e.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2};},{selector,text});await send('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',clickCount:1,...point});await send('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',clickCount:1,...point});};
+  const click=async(selector,text)=>{const point=await evaluate(async({selector,text})=>{const e=[...document.querySelectorAll(selector)].find(e=>!text||e.textContent.trim()===text);if(!e)throw new Error(`Missing ${selector} ${text||''}`);const initial=e.getBoundingClientRect();if(initial.top<125||initial.bottom>innerHeight-100)e.scrollIntoView({block:'center',behavior:'instant'});await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));const r=e.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2};},{selector,text});await send('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',clickCount:1,...point});await send('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',clickCount:1,...point});};
   const screenshot=async name=>{await sleep(350);const r=await send('Page.captureScreenshot',{format:'png'});fs.writeFileSync(path.join(out,name),Buffer.from(r.data,'base64'));};
   return {send,evaluate,click,screenshot,errors};
 }
@@ -25,12 +26,22 @@ function attachClient(rootSession,sessionId){
   try{
     const worker=context.serviceWorkers()[0]||await context.waitForEvent('serviceworker');
     const extensionId=new URL(worker.url()).host;
-    await worker.evaluate(async()=>{
+    await worker.evaluate(async({bili,fixtureId})=>{
       const transcript=[{text:'Consistency is important when you learn something new. A little practice every day builds a useful habit.',start:0,duration:12},{text:'The book which she recommended changed my perspective, although I was initially reluctant to read it.',start:22,duration:12}];
+      for(let i=0;i<14;i++)transcript.push({text:`This is another complete practice sentence about learning English every day, number ${i+1}.`,start:45+i*20,duration:12});
       await chrome.storage.local.clear();
       await chrome.storage.local.set({ytd_settings:{aiApiKey:'fixture-key',supadataApiKey:'fixture-key'},digest_abcDEF12345:{timestamp:Date.now(),videoTitle:'English practice fixture',channelName:'Test fixture',transcriptLanguage:'en',transcriptSource:'native',transcript,transcriptText:transcript.map(t=>t.text).join(' '),transcriptTimestamped:transcript.map(t=>`[${t.start}] ${t.text}`).join('\n')}});
-      globalThis.__fixtureCalls=[];globalThis.__fixtureDelay=0;
+      if(bili){await chrome.storage.local.remove('digest_abcDEF12345');await chrome.storage.local.set({ytd_settings:{aiApiKey:'fixture-key'}});}
+      globalThis.__nativeCalls=[];globalThis.__fixtureCalls=[];globalThis.__fixtureDelay=0;
       const original=globalThis.fetch;globalThis.fetch=async(url,options)=>{
+        if(bili && /https:\/\/(api\.bilibili\.com|aisubtitle\.hdslb\.com)\//.test(String(url))){
+          __nativeCalls.push(String(url));let payload;
+          if(String(url).includes('/view?'))payload={code:0,data:{bvid:'BV1xx411c7mD',aid:1,title:'B 站英语课堂',owner:{name:'测试老师'},pages:[{page:1,cid:10},{page:2,cid:20,part:'英语学习 · 第二节'}]}};
+          else if(String(url).includes('/nav'))payload={data:{wbi_img:{img_url:'https://i0.hdslb.com/bfs/wbi/7cd084941338484aae1ad9425b84077c.png',sub_url:'https://i0.hdslb.com/bfs/wbi/4932caff0ff746eab6f01bf08b70ac45.png'}}};
+          else if(String(url).includes('/player/'))payload={code:0,data:{subtitle:{subtitles:[{lan:'en',lan_doc:'英语',subtitle_url:'https://aisubtitle.hdslb.com/fixture.json'}]}}};
+          else payload={body:transcript.map(s=>({from:s.start,to:s.start+s.duration,content:s.text}))};
+          return new Response(JSON.stringify(payload),{headers:{'Content-Type':'application/json'}});
+        }
         if(String(url).startsWith('https://api.deepseek.com/')){
           const req=JSON.parse(options.body);__fixtureCalls.push(req);if(__fixtureDelay)await new Promise(r=>setTimeout(r,__fixtureDelay));
           let payload;try{payload=JSON.parse(req.messages[1].content);}catch{}
@@ -41,10 +52,10 @@ function attachClient(rootSession,sessionId){
         }
         if(String(url).startsWith('https://'))throw new Error('LIVE PROVIDER DISABLED IN FIXTURE TEST');return original(url,options);
       };
-    });
+    },{bili,fixtureId});
     for(const p of context.pages())if(p.url().includes('options.html'))await p.close();
-    await context.route('https://www.youtube.com/**',route=>route.fulfill({contentType:'text/html',body:`<!doctype html><html><head><title>English practice fixture</title><style>video{width:600px;height:300px;background:#ddd}ytd-watch-metadata{display:block}</style></head><body><h1>English practice fixture</h1><div id="movie_player" class="html5-video-player"><video muted></video></div><ytd-watch-metadata><div id="actions-inner" style="width:400px;height:40px"><div id="top-level-buttons-computed" style="width:400px;height:40px">Share</div></div></ytd-watch-metadata><div id="comments">Comments</div><ytd-watch-next-secondary-results-renderer>Recommendations</ytd-watch-next-secondary-results-renderer></body></html>`}));
-    const video=await context.newPage();await video.goto('https://www.youtube.com/watch?v=abcDEF12345');
+    await context.route(bili?'https://www.bilibili.com/**':'https://www.youtube.com/**',route=>route.fulfill({contentType:'text/html',body:`<!doctype html><html><head><meta charset="UTF-8"><title>English practice fixture</title><style>video{width:600px;height:300px;background:#ddd}ytd-watch-metadata{display:block}</style></head><body><h1 class="video-title">英语学习测试视频</h1><div class="video-toolbar-left"></div><div class="recommend-list-v1">推荐</div><div id="movie_player" class="html5-video-player"><video muted></video></div><ytd-watch-metadata><div id="actions-inner" style="width:400px;height:40px"><div id="top-level-buttons-computed" style="width:400px;height:40px">Share</div></div></ytd-watch-metadata><div id="comments">Comments</div><ytd-watch-next-secondary-results-renderer>Recommendations</ytd-watch-next-secondary-results-renderer></body></html>`}));
+    const video=await context.newPage();await video.goto(bili?'https://www.bilibili.com/video/BV1xx411c7mD/?p=2':'https://www.youtube.com/watch?v=abcDEF12345');
     await video.locator('#ytd-digest-button').click({timeout:12000});
     const cdp=await context.newCDPSession(video);let target;
     await until(async()=>{target=(await cdp.send('Target.getTargets')).targetInfos.find(t=>t.url===`chrome-extension://${extensionId}/sidepanel.html`);return !!target;},'side panel target');
@@ -52,6 +63,9 @@ function attachClient(rootSession,sessionId){
     await panel.send('Runtime.enable');await panel.send('Page.enable');await panel.send('Emulation.setDeviceMetricsOverride',{width:420,height:900,deviceScaleFactor:1,mobile:false});
     await until(()=>panel.evaluate(()=>document.querySelectorAll('.transcript-original,.transcript-text').length>=2),'rendered transcript');
     assert.equal(await panel.evaluate(()=>document.querySelector('[data-tab="ask"]')),null);
+    assert.deepEqual(await panel.evaluate(()=>[...document.querySelectorAll('.tab')].map(e=>e.textContent.trim())),['字幕','概览','收藏库','学习']);
+    if(bili){assert.equal(await worker.evaluate(()=>__nativeCalls.length),4);assert.ok(await worker.evaluate(()=>__nativeCalls.some(u=>u.includes('cid=20'))));}
+
     await sleep(400); // The panel's entry animation must settle before hit testing.
     // A real pointer dwell must not call the provider early or save automatically.
     const point=await panel.evaluate(()=>{const root=document.querySelector('.transcript-text'),r=document.createRange();r.setStart(root.firstChild,0);r.setEnd(root.firstChild,11);const b=r.getBoundingClientRect();return {x:b.left+15,y:b.top+b.height/2};});
@@ -99,6 +113,8 @@ function attachClient(rootSession,sessionId){
       const v=document.querySelector('video');v.srcObject=canvas.captureStream(10);await v.play();
     });
     await until(()=>worker.evaluate(async()=>((await chrome.storage.local.get('ytd_study')).ytd_study.sessions[0].watchMs>=2000)),'real playback accounting');
+    const countdowns=new Set();for(let i=0;i<9;i++){countdowns.add(await panel.evaluate(()=>document.querySelector('#studyStats>p')?.textContent));await sleep(400);}
+    assert.ok(countdowns.size>=3,'countdown visibly advances every second');await panel.screenshot('07-countdown.png');
     const beforeBackground=await worker.evaluate(async()=>(await chrome.storage.local.get('ytd_study')).ytd_study.sessions[0].watchMs);
     const backgroundTab=await context.newPage();await backgroundTab.goto('about:blank');await sleep(3500);
     const afterBackground=await worker.evaluate(async()=>(await chrome.storage.local.get('ytd_study')).ytd_study.sessions[0].watchMs);
@@ -126,8 +142,18 @@ function attachClient(rootSession,sessionId){
     });
     await panel.click('.learning-float button','收藏长难句');
     await until(()=>worker.evaluate(async()=>((await chrome.storage.local.get('ytd_sentences')).ytd_sentences?.[0]?.analysisStatus==='ready')),'sentence analysis');
-    const entry=await worker.evaluate(async()=>(await chrome.storage.local.get('ytd_sentences')).ytd_sentences[0]);assert.match(entry.term,/Consistency/);assert.match(entry.term,/The book/);assert.doesNotMatch(entry.term,/Explain|Save|0:00|中文测试/);assert.equal(entry.timestampSeconds,0);
+    const entry=await worker.evaluate(async()=>(await chrome.storage.local.get('ytd_sentences')).ytd_sentences[0]);assert.match(entry.term,/Consistency/);assert.match(entry.term,/The book/);assert.doesNotMatch(entry.term,/Explain|Save|解释|收藏|0:00|中文测试/);assert.equal(entry.timestampSeconds,0);
     await panel.click('.learning-float button','关闭');await panel.evaluate(()=>getSelection().removeAllRanges());
+    // Restore following while the same subtitle is already highlighted.
+    await worker.evaluate(async()=>{const [tab]=await chrome.tabs.query({active:true,lastFocusedWindow:true});await chrome.scripting.executeScript({target:{tabId:tab.id},func:()=>Object.defineProperty(document.querySelector('video'),'currentTime',{configurable:true,get:()=>22})});});
+    await until(()=>panel.evaluate(()=>document.querySelector('.active-playback')?.dataset.seconds==='22'),'active playback subtitle');
+    await sleep(1200);
+    await panel.evaluate(()=>{const area=document.getElementById('contentArea');area.scrollTop=area.scrollHeight;});
+    await until(()=>panel.evaluate(()=>document.getElementById('followPlaybackToggle').getAttribute('aria-pressed')==='false'),'manual scroll turns following off');
+    await panel.click('#followPlaybackToggle');await sleep(700);
+    assert.equal(await panel.evaluate(()=>document.getElementById('followPlaybackToggle').getAttribute('aria-pressed')),'true');
+    assert.ok(await panel.evaluate(()=>{const r=document.querySelector('.active-playback').getBoundingClientRect();return r.top>=80&&r.bottom<innerHeight;}),'follow button recenters the existing active row');
+    await panel.screenshot('06-follow.png');await worker.evaluate(async()=>{const [tab]=await chrome.tabs.query({active:true,lastFocusedWindow:true});await chrome.scripting.executeScript({target:{tabId:tab.id},func:()=>delete document.querySelector('video').currentTime});});
     await panel.click('[data-tab="library"]');await panel.click('#librarySentencesTab');
     await until(()=>panel.evaluate(()=>document.querySelectorAll('#sentencesList .learning-card').length===1),'sentence library');
     await panel.click('#sentencesList button','修改分类');
@@ -150,8 +176,14 @@ function attachClient(rootSession,sessionId){
     await until(()=>worker.evaluate(async()=>Object.keys((await chrome.storage.local.get('ytd_reviews')).ytd_reviews||{}).length===1),'review saved');assert.equal(await worker.evaluate(()=>__fixtureCalls.length),callsBefore);
     await panel.click('#studyPanel button','结束学习');await until(()=>video.evaluate(()=>!document.documentElement.hasAttribute('data-ytd-study-focus')),'distraction cleanup');
     assert.deepEqual(panel.errors,[]);
+    const settingsPage=await context.newPage();await settingsPage.goto(`chrome-extension://${extensionId}/options.html`);
+    await settingsPage.locator('#supadataApiKey').fill('');await settingsPage.locator('#aiApiKey').fill('fixture-key');
+    await settingsPage.locator('button[type=submit]').click();await until(async()=>(await settingsPage.locator('#saveStatus').innerText()).includes('设置已保存'),'Chinese settings save without Supadata');
+    await settingsPage.setViewportSize({width:1200,height:2100});await settingsPage.evaluate(()=>scrollTo(0,0));await sleep(500);
+    await settingsPage.screenshot({path:path.join(out,'08-settings.png')});
+
     console.log('PASS: extension load, 600ms hover, quick movement, stale results, cached save, bilingual cross-row sentence, tags, real playback/background accounting, deadline pause, extension, DOCX download, review and cleanup');
-    fs.writeFileSync(path.join(out,'result.json'),JSON.stringify({passed:true,checks:['hover','quick-movement','stale-results','cache','bilingual-sentence-range','tags','real-playback','background-accounting','deadline-pause','extend','docx','review','cleanup'],errors:panel.errors},null,2));
+    fs.writeFileSync(path.join(out,'result.json'),JSON.stringify({passed:true,platform:bili?'bilibili':'youtube',checks:['chinese-settings-no-supadata','chinese-ui','second-countdown','follow-playback','hover','quick-movement','stale-results','cache','bilingual-sentence-range','tags','real-playback','background-accounting','deadline-pause','extend','docx','review','cleanup'],errors:panel.errors},null,2));
   }catch(error){if(panel){console.error('PANEL',await panel.evaluate(()=>document.body.innerText).catch(()=>''));await panel.screenshot('failure.png').catch(()=>{});}throw error;}
-  finally{await context.close();fs.rmSync(profile,{recursive:true,force:true});}
+  finally{await context.close();fs.rmSync(profile,{recursive:true,force:true,maxRetries:5,retryDelay:200});}
 })().catch(error=>{console.error(error.stack);process.exitCode=1;});

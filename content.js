@@ -7,7 +7,7 @@
  * It handles:
  * 1. Extracting video info (title, channel name) from the page
  * 2. Injecting "key moment" markers onto YouTube's progress bar
- * 3. Adding a "Digest" button to YouTube's action bar (next to Share/Save)
+ * 3. Adding a "英语学习" button to YouTube's action bar (next to Share/Save)
  *
  * Think of it like a robot sitting inside the YouTube tab,
  * reading the page and making small visual changes.
@@ -140,9 +140,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.action === "getCurrentTime") {
     // Return the current video playback time (used by auto-scroll)
-    const video = document.querySelector("video.html5-main-video");
+    const video = (document.querySelector("video.html5-main-video") || document.querySelector("video"));
     sendResponse({
-      currentTime: video ? Math.floor(video.currentTime) : 0,
+      videoId: globalThis.YTD_PLATFORM?.videoIdFromUrl(location.href),
+      currentTime: video ? video.currentTime : 0,
       paused: video ? video.paused : true,
     });
     return false;
@@ -174,7 +175,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 // ============================================================
 
 /**
- * Injects a "Digest" button into YouTube's action bar.
+ * Injects a "英语学习" button into YouTube's action bar.
  * The button appears next to Share, Save, etc. below the video.
  *
  * When clicked, it opens the YouTube Digest side panel.
@@ -232,10 +233,10 @@ function createDigestButton() {
   let requiresPageReload = false;
   digestButton.id = "ytd-digest-button";
   digestButton.type = "button";
-  digestButton.setAttribute("aria-label", "Open YouTube Digest");
+  digestButton.setAttribute("aria-label", "打开英语学习侧栏");
   digestButton.innerHTML = `
     <span class="ytd-digest-icon" style="font-size: 11px;">▶</span>
-    <span class="ytd-digest-label">Digest</span>
+    <span class="ytd-digest-label">英语学习</span>
   `;
 
   // Style the button — rounded pill in our terracotta accent, sized to sit
@@ -301,12 +302,12 @@ function createDigestButton() {
         requiresPageReload = true;
         digestButton.setAttribute(
           "aria-label",
-          "Refresh YouTube to reconnect YouTube Digest",
+          "刷新视频页以重新连接学习扩展",
         );
-        digestButton.title = "The extension was updated. Refresh this page to reconnect.";
+        digestButton.title = "扩展已更新，请刷新当前视频页后继续使用。";
         digestButton.innerHTML = `
           <span class="ytd-digest-icon" style="font-size: 15px;">↻</span>
-          <span class="ytd-digest-label">Refresh page</span>
+          <span class="ytd-digest-label">刷新页面</span>
         `;
       }
     }
@@ -413,7 +414,7 @@ function setupButtonObserver() {
 // ============================================================
 
 /**
- * Injects a "Note" button overlay on top of the YouTube video player.
+ * Injects a "笔记" button overlay on top of the YouTube video player.
  * The button appears when the mouse enters or moves over the player and hides
  * after the cursor stays still for more than 2 seconds or leaves the player.
  */
@@ -465,7 +466,7 @@ function injectNoteButton() {
       <path d="M12 20h9"></path>
       <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
     </svg>
-    <span>Note</span>
+    <span>笔记</span>
   `;
 
   // Soft rounded pill in the terracotta accent, with a gentle shadow.
@@ -593,7 +594,7 @@ function handleNoteKeyboardShortcut(e) {
 async function saveCurrentNote() {
   debugLog("[YouTube Digest] Saving note");
 
-  const video = document.querySelector("video.html5-main-video");
+  const video = (document.querySelector("video.html5-main-video") || document.querySelector("video"));
   if (!video) {
     console.error("[YouTube Digest] No video element found");
     return;
@@ -609,7 +610,7 @@ async function saveCurrentNote() {
 
   if (noteButton) {
     noteButton.innerHTML =
-      '<span style="letter-spacing: 0.2px;">SAVING...</span>';
+      '<span style="letter-spacing: 0.2px;">正在保存…</span>';
     noteButton.style.pointerEvents = "none";
   }
 
@@ -625,21 +626,21 @@ async function saveCurrentNote() {
     if (result.success) {
       if (noteButton) {
         noteButton.innerHTML =
-          '<span style="letter-spacing: 0.2px;">SAVED</span>';
+          '<span style="letter-spacing: 0.2px;">已保存</span>';
         noteButton.style.background = "#7c8b6f";
       }
       showNoteSavedToast(result.note);
     } else {
       if (noteButton) {
         noteButton.innerHTML =
-          '<span style="letter-spacing: 0.2px;">ERROR</span>';
+          '<span style="letter-spacing: 0.2px;">保存失败</span>';
       }
       console.error("[YouTube Digest] Save note error:", result.error);
     }
   } catch (err) {
     if (noteButton) {
       noteButton.innerHTML =
-        '<span style="letter-spacing: 0.2px;">ERROR</span>';
+        '<span style="letter-spacing: 0.2px;">保存失败</span>';
     }
     console.error("[YouTube Digest] Save note exception:", err);
   }
@@ -664,11 +665,11 @@ function showNoteSavedToast(note) {
   const toast = document.createElement("div");
   toast.id = "ytd-note-toast";
   toast.innerHTML = `
-    <div style="font-weight: 700; margin-bottom: 6px; color: #c8674f;">📝 Note saved</div>
+    <div style="font-weight: 700; margin-bottom: 6px; color: #c8674f;">📝 笔记已保存</div>
     <div style="font-size: 12px; color: #6b6258; margin-bottom: 8px;">${escapeHtmlForContent(note.timestamp)} — ${escapeHtmlForContent(note.videoTitle)}</div>
     <div style="font-size: 13px; line-height: 1.55; color: #2e2a24;">"${escapeHtmlForContent(note.text)}"</div>
     <div style="margin-top: 10px; font-size: 11px;">
-      <a href="${escapeHtmlForContent(note.timestampedUrl)}" style="color: #c8674f; font-weight: 600; text-decoration: none;">🔗 Copy link</a>
+      <a href="${escapeHtmlForContent(note.timestampedUrl)}" style="color: #c8674f; font-weight: 600; text-decoration: none;">🔗 复制链接</a>
     </div>
   `;
 
@@ -702,7 +703,7 @@ function showNoteSavedToast(note) {
     e.preventDefault();
     try {
       await navigator.clipboard.writeText(note.timestampedUrl);
-      e.target.textContent = "✓ Copied!";
+      e.target.textContent = "✓ 已复制";
     } catch (err) {
       console.error("Copy failed:", err);
     }
@@ -737,7 +738,7 @@ function extractVideoInfo() {
   );
 
   // Video duration from the video element
-  const videoElement = document.querySelector("video.html5-main-video");
+  const videoElement = (document.querySelector("video.html5-main-video") || document.querySelector("video"));
 
   // Video description — YouTube has this in a few possible places
   const descriptionElement = document.querySelector(
@@ -789,7 +790,7 @@ function highlightKeyMoments(moments, videoDuration) {
  * which is the standard HTML5 way to seek in a video.
  */
 function seekToTimestamp(seconds) {
-  const video = document.querySelector("video.html5-main-video");
+  const video = (document.querySelector("video.html5-main-video") || document.querySelector("video"));
   if (!video) {
     console.error("[YouTube Digest Content] No video element found for seek");
     return;

@@ -29,3 +29,10 @@
 .learning-history-row{font-size:11px;padding:7px 0;margin:0;border-bottom:1px solid #e0e6e0;font-variant-numeric:tabular-nums}
 .library-switch{grid-template-columns:repeat(3,minmax(0,1fr));border-radius:12px}.library-switch-btn{padding-inline:6px;min-width:0}
 @media(prefers-reduced-motion:reduce){.learning-float,.learning-toast{scroll-behavior:auto;transition:none}}
+/* A persistent control stays reachable in both original and bilingual modes. */
+#followPlaybackBtn{display:none!important}
+#followPlaybackToggle{white-space:nowrap;min-width:100px}
+#followPlaybackToggle[aria-pressed=true]{background:#e4ece2;color:#294f3b;border-color:#b9ccb4}
+.sticky-control-row{flex-wrap:wrap;gap:8px}.transcript-actions{flex-wrap:wrap;gap:6px}
+/* The old negative sticky offset put controls underneath the fixed header. */
+.sticky-control-row{top:0}

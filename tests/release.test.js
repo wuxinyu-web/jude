@@ -13,11 +13,11 @@ test("notes filters preserve selected contrast and expose pressed state", () => 
 
   assert.match(
     html,
-    /id="notesFilterThis"[\s\S]*?aria-pressed="true"[\s\S]*?>[\s\S]*?This Video/,
+    /id="notesFilterThis"[\s\S]*?aria-pressed="true"[\s\S]*?>[\s\S]*?当前视频/,
   );
   assert.match(
     html,
-    /id="notesFilterAll"[\s\S]*?aria-pressed="false"[\s\S]*?>[\s\S]*?All Notes/,
+    /id="notesFilterAll"[\s\S]*?aria-pressed="false"[\s\S]*?>[\s\S]*?全部笔记/,
   );
   assert.match(
     css,
@@ -38,7 +38,7 @@ test("Library and Vocabulary controls have visible selected and keyboard focus s
   const html = read("sidepanel.html");
   const css = read("sidepanel.css");
 
-  assert.match(html, /data-tab="library"[^>]*>Library<\/button>/);
+  assert.match(html, /data-tab="library"[^>]*>收藏库<\/button>/);
   assert.doesNotMatch(html, /data-tab="notes"/);
   assert.match(html, /class="library-switch"[^>]*role="group"/);
   assert.match(css, /\.library-switch-btn:focus-visible\s*\{[^}]*outline:/);

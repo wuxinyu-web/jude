@@ -27,3 +27,10 @@ test("unfinished analysis is explicit, arbitrary source fields are excluded and 
   const xml=unzip(await D.Packer.toBuffer(W.buildDocument([{...sentence,term:"If A < B & C",analysisStatus:"error",apiKey:"NOT_FOR_EXPORT"}])))["word/document.xml"];
   assert.match(xml,/解析尚未完成/);assert.match(xml,/&lt; B &amp; C/);assert.doesNotMatch(xml,/NOT_FOR_EXPORT/);
 });
+test('Bilibili handout and quiz source links preserve part and timestamp',async()=>{
+  for(const mode of ['handout','quiz']){
+    const files=unzip(await D.Packer.toBuffer(W.buildDocument([{...word,videoId:'BV1xx411c7mD_p2'}],{mode})));
+    assert.match(files['word/_rels/document.xml.rels'],/https:\/\/www.bilibili.com\/video\/BV1xx411c7mD\/\?p=2&amp;t=62/);
+    assert.doesNotMatch(files['word/_rels/document.xml.rels'],/youtube.com/);
+  }
+});

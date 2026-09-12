@@ -1,6 +1,8 @@
-# YouTube Digest 学习开发版
+# Video English Study — Bilibili and YouTube (1.5.0)
 
-Read English YouTube subtitles, collect vocabulary and sentences, review with flashcards, and print Word worksheets. This local remix targets Chinese-speaking high school and university learners. Version 1.4.0.
+The entire interface and settings are Simplified Chinese. Bilibili native captions require no Supadata key; English tracks are preferred, and missing captions or login requirements are explicit. Part numbers remain distinct in caches, collections, sessions and DOCX links. YouTube support and existing stored data remain compatible.
+
+A persistent follow-playback toggle immediately recenters the current caption after manual scrolling. Study time displays minutes and seconds with one-second updates, without counting background or paused-study time.
 
 ## Install and update
 

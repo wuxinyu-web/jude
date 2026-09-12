@@ -574,7 +574,7 @@ test("the panel reconciles against only the active tab in the last-focused windo
   );
   assert.match(
     checkCurrentTabSource,
-    /if \(!tab\.url\.startsWith\("https:\/\/www\.youtube\.com"\)\) \{\s*handleFrontTabUrl\(tab\.url\);\s*return;\s*\}/,
+    /YTD_PLATFORM\.supported\(tab\.url\)/,
   );
   assert.doesNotMatch(checkCurrentTabSource, /tabs\.query\(\{\s*url:/);
   assert.doesNotMatch(
@@ -632,10 +632,10 @@ test("the Explain modal snapshots video identity and exposes an accessible dialo
     showExplanationSource,
     /class="explain-modal" role="dialog" aria-modal="true" aria-labelledby="explainModalTitle"/,
   );
-  assert.match(showExplanationSource, /id="explainModalTitle"[^>]*>Explain</);
+  assert.match(showExplanationSource, /id="explainModalTitle"[^>]*>解释</);
   assert.match(
     showExplanationSource,
-    /id="closeExplain"[^>]*aria-label="Close explanation"/,
+    /id="closeExplain"[^>]*aria-label="关闭解释"/,
   );
   assert.match(
     showExplanationSource,
@@ -647,7 +647,7 @@ test("the Explain modal snapshots video identity and exposes an accessible dialo
   );
   assert.match(
     showExplanationSource,
-    /class="explain-save-vocabulary"[^>]*>Save to Vocabulary<\/button>/,
+    /class="explain-save-vocabulary"[^>]*>收藏为词条<\/button>/,
   );
   assert.match(
     showExplanationSource,
@@ -667,11 +667,11 @@ test("every semantic transcript row exposes keyboard Explain and Save actions", 
   );
   assert.match(
     source,
-    /className = "[^"]*transcript-row-explain"[\s\S]*?setAttribute\(\s*"aria-label",\s*"Explain this transcript segment"/,
+    /className = "[^"]*transcript-row-explain"[\s\S]*?setAttribute\(\s*"aria-label",\s*"解释这段字幕"/,
   );
   assert.match(
     source,
-    /className = "[^"]*transcript-row-save"[\s\S]*?setAttribute\(\s*"aria-label",\s*"Save this transcript segment to Vocabulary"/,
+    /className = "[^"]*transcript-row-save"[\s\S]*?setAttribute\(\s*"aria-label",\s*"将这段字幕收藏为词条"/,
   );
   assert.match(
     source,

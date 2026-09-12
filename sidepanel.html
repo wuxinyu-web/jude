@@ -1,15 +1,15 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>YouTube Digest</title>
+    <title>视频英语学习</title>
     <link rel="stylesheet" href="sidepanel.css" />
     <link rel="stylesheet" href="lib/learning.css" />
   </head>
   <body>
     <!-- HEADER -->
-    <!-- Note: the panel's own "YouTube Digest" title is shown by Chrome's side-panel
+    <!-- Note: the panel's own "视频英语学习" title is shown by Chrome's side-panel
          title bar, so we don't repeat a logo here. -->
     <div class="header">
       <div class="header-top">
@@ -22,19 +22,17 @@
           class="settings-btn"
           id="settingsBtn"
           type="button"
-          title="Open YouTube Digest settings"
-          aria-label="Open YouTube Digest settings"
-        >
-          Settings
-        </button>
+          title="打开学习设置"
+          aria-label="打开学习设置"
+        >设置</button>
       </div>
 
       <!-- Tab navigation -->
       <div class="tabs" id="tabsNav" style="display: none">
-        <button class="tab active" data-tab="transcript">Transcript</button>
-        <button class="tab" data-tab="overview">Overview</button>
-        <button class="tab" data-tab="library">Library</button>
-        <button class="tab" data-tab="study">Study</button>
+        <button class="tab active" data-tab="transcript">字幕</button>
+        <button class="tab" data-tab="overview">概览</button>
+        <button class="tab" data-tab="library">收藏库</button>
+        <button class="tab" data-tab="study">学习</button>
       </div>
     </div>
 
@@ -43,21 +41,16 @@
       <!-- WELCOME STATE -->
       <div id="welcomeState" class="welcome-container">
         <div class="welcome-icon">&#9655;</div>
-        <div class="welcome-title">Ready to Digest</div>
-        <div class="welcome-desc">
-          Navigate to a YouTube video and click the extension icon to get an
-          AI-powered digest.
-        </div>
+        <div class="welcome-title">开始视频学习</div>
+        <div class="welcome-desc">打开哔哩哔哩或 YouTube 视频，点击「英语学习」或扩展图标，开始阅读字幕。</div>
       </div>
 
       <!-- LOADING STATE -->
       <div id="loadingState" style="display: none">
         <div class="loading-container">
           <div class="loading-bar"></div>
-          <div class="loading-text" id="loadingText">Fetching transcript</div>
-          <div class="loading-subtext" id="loadingSubtext">
-            Extracting captions from video...
-          </div>
+          <div class="loading-text" id="loadingText">正在获取字幕</div>
+          <div class="loading-subtext" id="loadingSubtext">正在读取视频字幕…</div>
         </div>
       </div>
 
@@ -65,11 +58,9 @@
       <div id="errorState" style="display: none">
         <div class="error-container">
           <div class="error-icon">&#9888;</div>
-          <div class="error-title" id="errorTitle">Error</div>
-          <div class="error-message" id="errorMessage">
-            Something went wrong.
-          </div>
-          <button class="error-btn" id="errorBtn">Try Again</button>
+          <div class="error-title" id="errorTitle">出错了</div>
+          <div class="error-message" id="errorMessage">操作未完成，请重试。</div>
+          <button class="error-btn" id="errorBtn">重试</button>
         </div>
       </div>
 
@@ -78,20 +69,20 @@
         <!-- TAB: Transcript (default - no LLM required) -->
         <div class="tab-panel active" data-panel="transcript">
           <div class="section">
-            <div class="section-title">Full Transcript</div>
+            <div class="section-title">完整字幕</div>
             <div class="sticky-control-row">
               <div
                 class="transcript-mode-control"
                 id="transcriptModeControl"
                 role="group"
-                aria-label="Transcript language"
+                aria-label="字幕语言"
               >
                 <button
                   class="transcript-mode-btn active"
                   type="button"
                   data-transcript-mode="original"
                   aria-pressed="true"
-                >Original</button>
+                >原文</button>
                 <button
                   class="transcript-mode-btn"
                   type="button"
@@ -107,31 +98,30 @@
                 <span
                   class="translation-spinner"
                   id="langSpinner"
-                  aria-label="Translating"
+                  aria-label="正在翻译"
                 ></span>
               </div>
               <div class="transcript-actions">
-                <button class="enhance-btn" id="copyTranscriptBtn">Copy</button>
-                <button class="enhance-btn" id="exportTranscriptBtn">
-                  Export
-                </button>
+                <button class="enhance-btn" id="followPlaybackToggle" type="button" aria-pressed="true" title="字幕自动滚动到当前播放位置；手动滚动后点击可恢复">跟随播放：开</button>
+                <button class="enhance-btn" id="copyTranscriptBtn">复制</button>
+                <button class="enhance-btn" id="exportTranscriptBtn">导出</button>
               </div>
             </div>
             <div class="transcript-search" role="search">
-              <label class="sr-only" for="transcriptSearchInput">Search transcript</label>
+              <label class="sr-only" for="transcriptSearchInput">搜索字幕</label>
               <div class="transcript-search-field">
                 <input
                   id="transcriptSearchInput"
                   type="search"
                   maxlength="200"
                   autocomplete="off"
-                  placeholder="Search transcript"
+                  placeholder="搜索字幕"
                 />
                 <button
                   class="transcript-search-clear"
                   id="transcriptSearchClear"
                   type="button"
-                  aria-label="Clear transcript search"
+                  aria-label="清空字幕搜索"
                   disabled
                 >&#215;</button>
               </div>
@@ -144,14 +134,14 @@
                 class="transcript-search-nav"
                 id="transcriptSearchPrevious"
                 type="button"
-                aria-label="Previous search result"
+                aria-label="上一条搜索结果"
                 disabled
               >&#8593;</button>
               <button
                 class="transcript-search-nav"
                 id="transcriptSearchNext"
                 type="button"
-                aria-label="Next search result"
+                aria-label="下一条搜索结果"
                 disabled
               >&#8595;</button>
             </div>
@@ -166,14 +156,14 @@
               class="transcript-mode-control"
               id="overviewModeControl"
               role="group"
-              aria-label="Overview language"
+              aria-label="概览语言"
             >
               <button
                 class="transcript-mode-btn active"
                 type="button"
                 data-overview-mode="original"
                 aria-pressed="true"
-              >Original</button>
+              >原文</button>
               <button
                 class="transcript-mode-btn"
                 type="button"
@@ -189,24 +179,22 @@
               <span
                 class="translation-spinner"
                 id="overviewLangSpinner"
-                aria-label="Translating overview"
+                aria-label="正在翻译概览"
               ></span>
             </div>
           </div>
 
           <!-- Full-video summary -->
           <div class="section overview-summary-section">
-            <div class="section-title">Summary</div>
+            <div class="section-title">内容摘要</div>
             <div class="summary-box">
-              <div class="summary-text" id="overviewSummary">
-                A concise summary will appear here
-              </div>
+              <div class="summary-text" id="overviewSummary">切换到概览后将生成内容摘要</div>
             </div>
           </div>
 
           <!-- Chapters -->
           <div class="section">
-            <div class="section-title">Chapters</div>
+            <div class="section-title">章节</div>
             <ul class="chapter-list" id="chapterList">
               <li
                 class="chapter-item"
@@ -215,15 +203,13 @@
                   cursor: default;
                   border-color: var(--border);
                 "
-              >
-                Chapters will appear here
-              </li>
+              >章节将在这里显示</li>
             </ul>
           </div>
 
           <!-- Key Quotes -->
           <div class="section">
-            <div class="section-title">Key Quotes</div>
+            <div class="section-title">重点语句</div>
             <div id="quotesList">
               <div
                 class="quote-item"
@@ -233,9 +219,7 @@
                   cursor: default;
                 "
               >
-                <div class="quote-text" style="font-style: normal">
-                  Quotes will be extracted when you view this tab...
-                </div>
+                <div class="quote-text" style="font-style: normal">切换到概览后将提取重点语句…</div>
               </div>
             </div>
           </div>
@@ -243,22 +227,22 @@
 
         <!-- TAB: Library -->
         <div class="tab-panel" data-panel="library">
-          <div class="library-switch" role="group" aria-label="Library section">
+          <div class="library-switch" role="group" aria-label="收藏类别">
             <button
               class="library-switch-btn"
               id="libraryNotesTab"
               type="button"
               aria-pressed="true"
               aria-controls="libraryNotesView"
-            >Notes</button>
+            >笔记</button>
             <button
               class="library-switch-btn"
               id="libraryVocabularyTab"
               type="button"
               aria-pressed="false"
               aria-controls="libraryVocabularyView"
-            >Vocabulary</button>
-            <button class="library-switch-btn" id="librarySentencesTab" type="button" aria-pressed="false" aria-controls="librarySentencesView">Sentences</button>
+            >单词</button>
+            <button class="library-switch-btn" id="librarySentencesTab" type="button" aria-pressed="false" aria-controls="librarySentencesView">长难句</button>
           </div>
 
           <div id="learningLibraryToolbar"></div>
@@ -266,29 +250,21 @@
           <div class="library-view" id="libraryNotesView" hidden>
             <div class="section">
               <div class="section-header">
-                <div class="section-title">Saved Notes</div>
+                <div class="section-title">已存笔记</div>
                 <div class="notes-filter">
                   <button
                     class="enhance-btn active"
                     id="notesFilterThis"
                     aria-pressed="true"
-                  >
-                    This Video
-                  </button>
+                  >当前视频</button>
                   <button
                     class="enhance-btn"
                     id="notesFilterAll"
                     aria-pressed="false"
-                  >
-                    All Notes
-                  </button>
+                  >全部笔记</button>
                 </div>
               </div>
-              <p class="notes-intro" id="notesIntro">
-                Move your mouse over the video and click the 📝 Note button to
-                save timestamped notes, or press the "n" key while the video is
-                focused.
-              </p>
+              <p class="notes-intro" id="notesIntro">点击视频旁的「记笔记」保存当前片段，也可以从概览保存重点语句。</p>
               <div id="notesList"></div>
             </div>
           </div>
@@ -314,10 +290,9 @@
       class="follow-playback-btn"
       id="followPlaybackBtn"
       style="display: none"
-    >
-      Follow playback
-    </button>
+    >跟随播放</button>
 
+    <script src="lib/platform.js"></script>
     <script src="settings.js"></script>
     <script src="lib/learning-core.js"></script>
     <script src="vendor/docx.umd.js"></script>
