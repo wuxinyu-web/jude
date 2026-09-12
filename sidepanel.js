@@ -118,6 +118,7 @@ function sendTranslationMessage(message) {
 }
 
 // --- Auto-scroll state (follow video playback in transcript) ---
+let manualTranscriptScrollRevision = 0;
 let autoScrollEnabled = true; // True = scroll transcript to follow video playback
 let autoScrollInterval = null; // setInterval ID for polling video time
 let lastAutoScrollTime = 0; // Timestamp of last programmatic scroll (ignores scroll events within 1s)
@@ -399,6 +400,10 @@ function setupTranscriptViewStateListeners() {
   const contentArea = document.getElementById("contentArea");
   contentArea?.removeEventListener("scroll", onContentAreaScroll);
   contentArea?.addEventListener("scroll", onContentAreaScroll);
+  for (const event of ["wheel", "touchmove", "keydown"]) {
+    contentArea?.removeEventListener(event, onTranscriptScrollIntent);
+    contentArea?.addEventListener(event, onTranscriptScrollIntent, { passive: true });
+  }
   window.addEventListener("pagehide", () => {
     captureTranscriptViewPosition({ immediate: true });
   });
@@ -1395,11 +1400,13 @@ function addTranscriptRowActions(row, segment) {
   );
   bindTranscriptRowAction(saveButton, row, segment, async (metadata) => {
     if(!immersive){await saveVocabularySelection(metadata, saveButton);return;}
+    const followSnapshot = sentenceFollowSnapshot();
     saveButton.disabled=true;
     try{
       const r=await chrome.runtime.sendMessage({action:'saveSentence',...metadata,term:segment.text,sourceExcerpt:segment.text,context:segment.text,timestamp:segment.start});
       if(!r?.success)throw new Error(r?.error||'收藏失败，请重试。');
       saveButton.textContent=r.alreadySaved?'已收藏':'已收藏 ✓';
+      void followAfterSentenceSave(followSnapshot);
       void globalThis.YTD_LEARNING_UI?.refreshLibrary();
       if(!r.alreadySaved)void chrome.runtime.sendMessage({action:'analyzeSentence',id:r.entry.id}).then(result=>{if(!result?.success)saveButton.title='原句已收藏；解析可到收藏库重试。';}).catch(()=>{});
     }catch(e){saveButton.disabled=false;saveButton.textContent='重试收藏';saveButton.title=e.message;}
@@ -3601,7 +3608,7 @@ function stopPlaybackTracking() {
  * One tick of the playback tracker. Gets current video time from the
  * YouTube tab and highlights + scrolls to the matching transcript entry.
  */
-async function playbackTrackingTick({ returnToPosition = false } = {}) {
+async function playbackTrackingTick({ returnToPosition = false, followSnapshot = null } = {}) {
   if (embeddedPanel && document.hidden) return false;
   const snapshotVideoId=currentVideoId, snapshotGeneration=digestGeneration;
   let timeout;
@@ -3617,6 +3624,7 @@ async function playbackTrackingTick({ returnToPosition = false } = {}) {
     if(result.response.videoId && result.response.videoId!==currentVideoId)return;
     const currentTime = result.response.currentTime;
     if (!Number.isFinite(currentTime) || currentTime < 0) return false;
+    if (followSnapshot && !canFollowAfterSentenceSave(followSnapshot)) return false;
     if (returnToPosition) autoScrollEnabled = true;
     document.dispatchEvent(new CustomEvent("ytdPlayback",{detail:{currentTime,videoId:currentVideoId,generation:digestGeneration}}));
     highlightActiveEntry(currentTime);
@@ -3691,7 +3699,7 @@ function highlightActiveEntry(currentSeconds) {
   activeEntry.classList.add("active-playback");
 
   // Only scroll if auto-scroll is enabled
-  if (autoScrollEnabled) {
+  if (autoScrollEnabled && !hasNonCollapsedTextSelection()) {
     lastAutoScrollTime = Date.now();
     activeEntry.scrollIntoView({ behavior: "smooth", block: "center" });
   }
@@ -3702,6 +3710,30 @@ function highlightActiveEntry(currentSeconds) {
  * Detects manual scrolling and disables auto-scroll so the user
  * can read at their own pace without being yanked back.
  */
+function onTranscriptScrollIntent(event) {
+  if (!transcriptTabIsActive()) return;
+  if (event.type === "keydown" && (!['ArrowUp','ArrowDown','PageUp','PageDown','Home','End',' '].includes(event.key) || /INPUT|TEXTAREA|SELECT|BUTTON/.test(event.target?.tagName || ''))) return;
+  manualTranscriptScrollRevision += 1;
+  autoScrollEnabled = false;
+  const button = document.getElementById("followPlaybackBtn");
+  if (button) button.style.display = "block";
+}
+
+function sentenceFollowSnapshot() {
+  return { videoId: currentVideoId, generation: digestGeneration,
+    revision: manualTranscriptScrollRevision, following: autoScrollEnabled };
+}
+function canFollowAfterSentenceSave(snapshot) {
+  return Boolean(snapshot?.following && autoScrollEnabled &&
+    snapshot.videoId === currentVideoId && snapshot.generation === digestGeneration &&
+    snapshot.revision === manualTranscriptScrollRevision && transcriptTabIsActive());
+}
+async function followAfterSentenceSave(snapshot) {
+  if (!canFollowAfterSentenceSave(snapshot)) return false;
+  window.getSelection()?.removeAllRanges();
+  return playbackTrackingTick({ returnToPosition: true, followSnapshot: snapshot });
+}
+
 function onContentAreaScroll() {
   if (!transcriptTabIsActive()) return;
   if (isRestoringTranscriptView) return;
@@ -3710,6 +3742,7 @@ function onContentAreaScroll() {
   // (smooth scroll animations can last longer than a simple boolean flag)
   if (Date.now() - lastAutoScrollTime < 1000) return;
 
+  manualTranscriptScrollRevision += 1;
   // User scrolled manually — disable auto-scroll and show the button
   if (autoScrollEnabled && autoScrollInterval) {
     autoScrollEnabled = false;
@@ -4241,6 +4274,7 @@ function setTranslatingSpinner(show) {
 // Pure helpers are exposed for the repository's Node tests. The extension does
 // not read this object at runtime.
 globalThis.__YTD_TRANSCRIPT_TESTING__ = {
+  sentenceFollowSnapshot, canFollowAfterSentenceSave, onTranscriptScrollIntent,
   loadTranscriptViewState,
   saveTranscriptViewState,
   transcriptTabIsActive,
@@ -4321,6 +4355,7 @@ globalThis.__YTD_RACE_TESTING__ = {
 
 // Narrow bridge for modular learning UI; keys and provider transport stay in the worker.
 globalThis.YTD_PANEL = {
+  sentenceFollowSnapshot, followAfterSentenceSave,
   context: () => ({ videoId: currentVideoId, videoTitle: currentVideoTitle,
     channelName: currentChannelName, tabId: youtubeTabId, generation: digestGeneration,
     segments: getActiveTranscriptSegments(), libraryView: currentLibraryView, source:currentTranscriptSource, language:currentTranscriptLanguage, hasNativeBackup:Boolean(currentNativeTranscriptBackup), partial:currentTranscriptPartial }),

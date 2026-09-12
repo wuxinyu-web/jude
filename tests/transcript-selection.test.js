@@ -749,3 +749,21 @@ test("capture setup delegates to one idempotent learning listener installation",
   assert.match(learning, /if\(captureInstalled\)return;captureInstalled=true/);
   assert.match(learning, /box\.addEventListener\("pointerdown".*preventDefault\(\).*stopPropagation\(\)/);
 });
+
+
+test("sentence save follows only while reading intent and video remain unchanged", () => {
+  const {helpers:h,setActiveTab} = loadTranscriptReadingPositionLifecycleHarness();
+  h.setTranscriptReadingPositionTestState({videoId:'video-a',generation:1,autoScrollEnabled:true});
+  const snapshot=h.sentenceFollowSnapshot();
+  assert.equal(h.canFollowAfterSentenceSave(snapshot),true);
+  h.onTranscriptScrollIntent({type:'wheel'});
+  assert.equal(h.canFollowAfterSentenceSave(snapshot),false);
+  h.setTranscriptReadingPositionTestState({autoScrollEnabled:true});
+  assert.equal(h.canFollowAfterSentenceSave(snapshot),false, 'in-flight save cannot undo later scrolling');
+  const next=h.sentenceFollowSnapshot();
+  h.setTranscriptReadingPositionTestState({videoId:'video-b'});
+  assert.equal(h.canFollowAfterSentenceSave(next),false);
+  h.setTranscriptReadingPositionTestState({videoId:'video-a'});
+  setActiveTab('library');
+  assert.equal(h.canFollowAfterSentenceSave(next),false);
+});
