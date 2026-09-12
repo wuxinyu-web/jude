@@ -19,3 +19,8 @@ test('Chinese captions are aligned by overlapping time spans, never rewritten as
 test('partial original-audio results retain the incomplete marker',()=>{const r={videoId:'BV1bfLwz1Eu4',language:'en',source:'local-asr',partial:true,transcript:[{text:'Hello.',start:0,duration:2}]};assert.equal(C.validateResult(r,r.videoId).partial,true);});
 
 test('first English buffer requires 20 captions, except completed short videos and existing English updates',()=>{assert.equal(C.readyToApply({partial:true,transcript:Array(19)}),false);assert.equal(C.readyToApply({partial:true,transcript:Array(20)}),true);assert.equal(C.readyToApply({partial:false,transcript:Array(3)}),true);assert.equal(C.readyToApply({partial:true,transcript:Array(3)},true),true);});
+
+test('movie ASR accepts timestamps beyond 90 minutes but rejects over three hours',()=>{
+ assert.equal(C.validateResult({...result,transcript:[{text:'The end.',start:6790,duration:10}]},id).transcript[0].start,6790);
+ assert.throws(()=>C.validateResult({...result,transcript:[{text:'Too long.',start:10805,duration:2}]},id));
+});

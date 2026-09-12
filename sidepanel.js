@@ -1043,7 +1043,7 @@ async function startDigest(videoId, videoUrl) {
       );
       return;
     }
-    if (transcriptResult.error === "NO_TRANSCRIPT") {
+    if (transcriptResult.error === "NO_TRANSCRIPT" || transcriptResult.error === "BILI_NO_SUBTITLE") {
       showMissingTranscriptError(
         transcriptResult.message ||
           "这个视频没有可读取的字幕轨。",
@@ -1550,6 +1550,16 @@ function buildAudioTranscriptionConfirmation(durationSeconds) {
 }
 
 function showMissingTranscriptError(message) {
+  if (YTD_PLATFORM.biliParts(currentVideoId)) {
+    showError("没有可读取的字幕轨", "仍可直接识别英文音轨，生成英文字幕及中文翻译。支持 3 小时以内的公开视频，需本地转写服务运行。");
+    document.getElementById("errorBtn").textContent="从英文原声生成字幕";
+    errorAction=async()=>{
+      document.documentElement.setAttribute('data-awaiting-english','');
+      showState('results');switchTab('transcript');renderTranscript();
+      await globalThis.YTD_ASR_UI?.start();
+    };
+    return;
+  }
   showError("没有找到字幕", message);
   document.getElementById("errorBtn").textContent =
     "从音频生成字幕";
@@ -4347,6 +4357,7 @@ async function restoreNativeTranscript(){
 }
 async function replaceTranscriptSource(result,snapshot){
   if(!isCurrentDigestRequest(snapshot))return;
+  const hadNoCaptions=!currentTranscript?.length;
   snapshot={...snapshot,generation:++digestGeneration};
   globalThis.YTD_LEARNING_UI?.videoChanged();
   // Invalidate work based on the previous language, including explanation context.
@@ -4360,4 +4371,5 @@ async function replaceTranscriptSource(result,snapshot){
   resetTranscriptSearchForVideo(currentVideoId);stopPlaybackTracking();renderTranscript();showState("results");
   document.getElementById("tabsNav").style.display="flex";switchTab("transcript");
   setupExplainFeature();await saveToCache(currentVideoId,snapshot);globalThis.YTD_ASR_UI?.refresh();
+  if(hadNoCaptions && isCurrentDigestRequest(snapshot))void handleTranscriptModeChange("bilingual");
 }

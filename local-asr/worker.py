@@ -10,8 +10,8 @@ import subprocess
 import time
 from server import read_json, write_json, VIDEO
 
-MAX_SECONDS = 90 * 60
-MAX_BYTES = 150 * 1024 * 1024
+MAX_SECONDS = 180 * 60
+MAX_BYTES = 300 * 1024 * 1024
 
 def main():
     parser = argparse.ArgumentParser()
@@ -47,14 +47,14 @@ def main():
         def progress(data):
             downloaded = data.get('downloaded_bytes', 0)
             if downloaded > MAX_BYTES:
-                raise ValueError('音频超过 150 MB，请选择较短的视频。')
+                raise ValueError('音频超过 300 MB，请选择较短的视频。')
             total = data.get('total_bytes') or data.get('total_bytes_estimate') or 0
             update('downloading', '正在下载原声音频到本机', min(15, round(downloaded / total * 15)) if total else 0)
         def filter_video(info, *, incomplete=False):
             if info.get('is_live'):
                 return '暂不支持直播。'
             if (info.get('duration') or 0) > MAX_SECONDS:
-                return '本地转写暂限 90 分钟以内的视频。'
+                return '本地转写暂限 180 分钟以内的视频。'
         options = {'format':'bestaudio[ext=m4a]/bestaudio', 'outtmpl':str(folder/'audio.%(ext)s'),
             'noplaylist':True, 'playlist_items':page or '1', 'quiet':True, 'no_warnings':True,
             'socket_timeout':20, 'retries':2, 'fragment_retries':2, 'max_filesize':MAX_BYTES,
@@ -70,11 +70,13 @@ def main():
             raise ValueError('音频下载未完成或超过大小限制。')
         update('decoding', '正在解码原声', 16)
         decoded = subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), '-nostdin','-v','error','-i',str(audio_path),
-            '-t',str(MAX_SECONDS),'-f','f32le','-ac','1','-ar','16000','pipe:1'], capture_output=True, check=True, timeout=180)
+            '-t',str(MAX_SECONDS+1),'-f','f32le','-ac','1','-ar','16000','pipe:1'], capture_output=True, check=True, timeout=360)
         audio = np.frombuffer(decoded.stdout, np.float32).copy()
         if len(audio) < 16000:
             raise ValueError('视频中没有足够的可识别音频。')
         duration = len(audio)/16000
+        if duration > MAX_SECONDS:
+            raise ValueError("本地转写暂限 180 分钟以内的视频。")
         segments = []
         # Thirty-second batches publish usable captions before the whole job finishes.
         # A small overlap supplies context; midpoint ownership deduplicates boundaries.

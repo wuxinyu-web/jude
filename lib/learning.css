@@ -91,3 +91,9 @@ html.immersive .transcript-actions{flex:0 0 auto;gap:5px}html.immersive .transcr
 html.immersive ::highlight(ytd-hover-word){background-color:#d4dc9a;color:#172012;text-decoration-color:#536533}
 .transcript-original::selection,.transcript-text::selection,.transcript-original *::selection,.transcript-text *::selection{background:#b5cbbc;color:#182c20}
 .learning-float .learning-button:focus-visible{outline:2px solid #73925e;outline-offset:2px}
+
+/* Keep the no-caption action visible even in a shallow immersive dock. */
+html.immersive .error-container{min-height:0;gap:8px;padding:12px 8px}
+html.immersive .error-icon{font-size:24px}html.immersive .error-title{font-size:18px}
+html.immersive .error-message{max-width:680px;font-size:12px}
+html.immersive .error-btn{margin-top:0;padding:8px 18px;color:#172012}

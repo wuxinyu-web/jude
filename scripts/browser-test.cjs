@@ -2,7 +2,7 @@
 const {chromium}=require('playwright');
 const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),assert=require('node:assert/strict');
 const root=path.resolve(process.env.YTD_EXTENSION_DIR||path.join(__dirname,'..')),out=path.resolve(process.env.YTD_TEST_OUTPUT||path.join(root,'test-results'));
-const asr=process.env.YTD_TEST_ASR==='1';
+const asr=process.env.YTD_TEST_ASR==='1',noCaptions=process.env.YTD_TEST_NO_CAPTIONS==='1';
 const bili=process.env.YTD_TEST_PLATFORM==='bilibili',fixtureId=bili?'BV1xx411c7mD_p2':'abcDEF12345';
 fs.mkdirSync(out,{recursive:true});
 const profile=fs.mkdtempSync(path.join(os.tmpdir(),'ytd-study-browser-'));
@@ -27,7 +27,7 @@ function attachClient(rootSession,sessionId){
   try{
     const worker=context.serviceWorkers()[0]||await context.waitForEvent('serviceworker');
     const extensionId=new URL(worker.url()).host;
-    await worker.evaluate(async({bili,fixtureId,asr})=>{
+    await worker.evaluate(async({bili,fixtureId,asr,noCaptions})=>{
       const transcript=[{text:'Consistency is important when you learn something new. A little practice every day builds a useful habit.',start:0,duration:12},{text:'The book which she recommended changed my perspective, although I was initially reluctant to read it.',start:22,duration:12}];
       if(asr)for(const [i,item] of transcript.entries())item.text=i?'她推荐的书改变了我的看法。':'静止的物体将保持静止，运动的物体将保持运动。';
       for(let i=0;i<14;i++)transcript.push({text:`This is another complete practice sentence about learning English every day, number ${i+1}.`,start:45+i*20,duration:12});
@@ -40,7 +40,7 @@ function attachClient(rootSession,sessionId){
           __nativeCalls.push(String(url));let payload;
           if(String(url).includes('/view?'))payload={code:0,data:{bvid:'BV1xx411c7mD',aid:1,title:'B 站英语课堂',owner:{name:'测试老师'},pages:[{page:1,cid:10},{page:2,cid:20,part:'英语学习 · 第二节'}]}};
           else if(String(url).includes('/nav'))payload={data:{wbi_img:{img_url:'https://i0.hdslb.com/bfs/wbi/7cd084941338484aae1ad9425b84077c.png',sub_url:'https://i0.hdslb.com/bfs/wbi/4932caff0ff746eab6f01bf08b70ac45.png'}}};
-          else if(String(url).includes('/player/'))payload={code:0,data:{subtitle:{subtitles:[{lan:asr?'ai-zh':'en',lan_doc:asr?'中文':'英语',subtitle_url:'https://aisubtitle.hdslb.com/fixture.json'}]}}};
+          else if(String(url).includes('/player/'))payload={code:0,data:{subtitle:{subtitles:noCaptions?[]:[{lan:asr?'ai-zh':'en',lan_doc:asr?'中文':'英语',subtitle_url:'https://aisubtitle.hdslb.com/fixture.json'}]}}};
           else payload={body:transcript.map(s=>({from:s.start,to:s.start+s.duration,content:s.text}))};
           return new Response(JSON.stringify(payload),{headers:{'Content-Type':'application/json'}});
         }
@@ -54,7 +54,7 @@ function attachClient(rootSession,sessionId){
         }
         if(String(url).startsWith('https://'))throw new Error('LIVE PROVIDER DISABLED IN FIXTURE TEST');return original(url,options);
       };
-    },{bili,fixtureId,asr});
+    },{bili,fixtureId,asr,noCaptions});
     await context.route(bili?'https://www.bilibili.com/**':'https://www.youtube.com/**',route=>route.fulfill({contentType:'text/html',body:`<!doctype html><html><head><meta charset="UTF-8"><title>English practice fixture</title><style>video{width:600px;height:300px;background:#ddd}ytd-watch-metadata{display:block}</style></head><body><h1 class="video-title">英语学习测试视频</h1><div class="video-toolbar-left"></div><div class="recommend-list-v1">推荐</div><div id="movie_player" class="html5-video-player"><video muted></video></div><ytd-watch-metadata><div id="actions-inner" style="width:400px;height:40px"><div id="top-level-buttons-computed" style="width:400px;height:40px">Share</div></div></ytd-watch-metadata><div id="comments">Comments</div><ytd-watch-next-secondary-results-renderer>Recommendations</ytd-watch-next-secondary-results-renderer></body></html>`}));
     const video=await context.newPage();
     for(const p of context.pages())if(p.url().includes('options.html'))await p.close();
@@ -64,10 +64,11 @@ function attachClient(rootSession,sessionId){
     await until(async()=>{target=(await cdp.send('Target.getTargets')).targetInfos.find(t=>t.url===`chrome-extension://${extensionId}/sidepanel.html`);return !!target;},'side panel target');
     const {sessionId}=await cdp.send('Target.attachToTarget',{targetId:target.targetId,flatten:false});panel=attachClient(cdp,sessionId);
     await panel.send('Runtime.enable');await panel.send('Page.enable');await panel.send('Emulation.setDeviceMetricsOverride',{width:420,height:900,deviceScaleFactor:1,mobile:false});
-    await until(()=>panel.evaluate(()=>document.querySelectorAll('.transcript-original,.transcript-text').length>=2),'rendered transcript');
+    if(noCaptions)await until(()=>panel.evaluate(()=>document.getElementById('errorBtn').textContent==='从英文原声生成字幕'),'no-caption audio action');
+    else await until(()=>panel.evaluate(()=>document.querySelectorAll('.transcript-original,.transcript-text').length>=2),'rendered transcript');
     assert.equal(await panel.evaluate(()=>document.querySelector('[data-tab="ask"]')),null);
     assert.deepEqual(await panel.evaluate(()=>[...document.querySelectorAll('.tab')].map(e=>e.textContent.trim())),['字幕','概览','收藏库','学习']);
-    if(bili){assert.equal(await worker.evaluate(()=>__nativeCalls.length),4);assert.ok(await worker.evaluate(()=>__nativeCalls.some(u=>u.includes('cid=20'))));}
+    if(bili){assert.equal(await worker.evaluate(()=>__nativeCalls.length),noCaptions?3:4);assert.ok(await worker.evaluate(()=>__nativeCalls.some(u=>u.includes('cid=20'))));}
 
     if(process.env.YTD_TEST_IMMERSIVE==='1'||process.env.YTD_TEST_LAYOUT==='1'){
       const setTime=t=>worker.evaluate(async t=>{const [tab]=await chrome.tabs.query({active:true,lastFocusedWindow:true});await chrome.scripting.executeScript({target:{tabId:tab.id},args:[t],func:t=>Object.defineProperty(document.querySelector('video'),'currentTime',{configurable:true,get:()=>t})});},t);await setTime(2);
@@ -203,11 +204,32 @@ function attachClient(rootSession,sessionId){
         if(req.method==='OPTIONS'){res.writeHead(204);res.end();return;}
         assert.equal(req.headers['x-study-extension'],extensionId);
         let body='';req.on('data',chunk=>body+=chunk);req.on('end',()=>{
-          if(req.method==='POST'){starts++;cancelled=false;assert.equal(JSON.parse(body).videoId,fixtureId);if(process.env.YTD_TEST_AUTO_ASR==='1'&&starts===1){res.writeHead(503);res.end(JSON.stringify({error:'测试：本地转写服务暂不可用'}));return;}}
+          if(req.method==='POST'){starts++;cancelled=false;assert.equal(JSON.parse(body).videoId,fixtureId);if((process.env.YTD_TEST_AUTO_ASR==='1'||noCaptions)&&starts===1){res.writeHead(503);res.end(JSON.stringify({error:'测试：本地转写服务暂不可用'}));return;}}
           if(req.method==='DELETE')cancelled=true;
           res.end(JSON.stringify({id:'a'.repeat(32),videoId:fixtureId,status:cancelled?'cancelled':complete?'completed':'transcribing',message:cancelled?'已取消':complete?'转写完成':'正在转写英文原声',progress:complete?100:30,...(complete?{result}:partialCount?{result:{...result,partial:true,revision:partialCount,transcript:result.transcript.slice(0,partialCount)}}:{})}));
         });
       });await new Promise((resolve,reject)=>{asrServer.once('error',reject);asrServer.listen(Number(process.env.YTD_TEST_ASR_PORT)||8766,'127.0.0.1',resolve);});
+      if(noCaptions){
+        result.transcript[1].start=6780;
+        await panel.click('#enterImmersive');let frame;
+        await until(async()=>{frame=video.frames().find(f=>f.url().includes('immersive=1'));return frame&&await frame.locator('#errorBtn').isVisible();},'immersive no-caption action');
+        assert.equal(starts,0,'no job before the user starts');
+        const bounds=await frame.locator('#errorBtn').evaluate(e=>e.getBoundingClientRect().toJSON());assert.ok(bounds.bottom<=270,'action fits shallow dock');
+        await frame.locator('#errorBtn').click();
+        await until(()=>frame.locator('#localAsrStatus').innerText().then(t=>t.includes('暂不可用')),'service failure visible');
+        await sleep(2200);assert.equal(starts,1,'no automatic failure retry');
+        await frame.locator('#localAsrStart').click();
+        await until(()=>frame.locator('#localAsrCancel').isVisible(),'running job can cancel');
+        await frame.locator('#localAsrCancel').click();await until(()=>frame.locator('#localAsrStatus').innerText().then(t=>t.includes('已取消')),'cancel reported');
+        complete=true;await frame.locator('#localAsrStart').click();
+        await until(()=>frame.locator('.transcript-original').count().then(n=>n===2),'movie audio applied');
+        await until(()=>frame.locator('.transcript-translation').first().innerText().then(t=>t.includes('中文测试译文')),'English to Chinese translation');
+        assert.equal(await frame.evaluate(()=>YTD_PANEL.context().hasNativeBackup),false);
+        assert.equal(await frame.evaluate(()=>YTD_PANEL.rawSegments()[1].start),6780);
+        assert.equal(starts,3);await video.screenshot({path:path.join(out,'no-caption-movie-bilingual.png')});
+        fs.writeFileSync(path.join(out,'result.json'),JSON.stringify({passed:true,checks:['no-caption-action','small-dock','service-failure','manual-retry','cancel','movie-past-90-minutes','bilingual','no-fabricated-native-backup']}));
+        panel=null;console.log('PASS: no-caption movie audio fallback, failure/retry/cancel, three-hour timestamps and bilingual output');return;
+      }
       if(process.env.YTD_TEST_AUTO_ASR==='1'){
         assert.equal(await panel.evaluate(async()=>(await chrome.runtime.sendMessage({action:'syncImmersiveToolbar'})).success),false);
       await panel.click('#enterImmersive');let frame;
