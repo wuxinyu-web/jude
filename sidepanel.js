@@ -118,6 +118,7 @@ function sendTranslationMessage(message) {
 }
 
 // --- Auto-scroll state (follow video playback in transcript) ---
+let transcriptSeekRevision = 0;
 let manualTranscriptScrollRevision = 0;
 let autoScrollEnabled = true; // True = scroll transcript to follow video playback
 let autoScrollInterval = null; // setInterval ID for polling video time
@@ -1307,14 +1308,25 @@ function hasNonCollapsedTextSelection() {
 /**
  * Preserves normal row-click seeking while keeping text selection inert.
  */
-function seekFromTranscriptEntryClick(event, seconds) {
+async function seekFromTranscriptEntryClick(event, seconds) {
   if (hasNonCollapsedTextSelection()) {
     event.preventDefault();
     event.stopPropagation();
     return;
   }
 
-  seekTo(seconds);
+  const snapshot = sentenceFollowSnapshot();
+  const request = ++transcriptSeekRevision;
+  const success = await seekTo(seconds);
+  if (!success || request !== transcriptSeekRevision ||
+      snapshot.videoId !== currentVideoId || snapshot.generation !== digestGeneration ||
+      snapshot.revision !== manualTranscriptScrollRevision || !transcriptTabIsActive()) return;
+  autoScrollEnabled = true;
+  const button = document.getElementById("followPlaybackBtn");
+  if (button) button.style.display = "none";
+  highlightActiveEntry(Number(seconds));
+  // Reposition even if polling already highlighted this row while seeking.
+  scrollToActiveEntry("smooth");
 }
 
 function getDisplayedTranscriptRowText(row) {
@@ -1787,9 +1799,10 @@ async function seekTo(seconds) {
     // Try direct messaging to the stored YouTube tab first (fastest/reliable)
     if (youtubeTabId) {
       try {
-        await chrome.tabs.sendMessage(youtubeTabId, payload);
+        const response = await chrome.tabs.sendMessage(youtubeTabId, payload);
+        if (!response?.success) return false;
         debugLog("[YouTube Digest Panel] seekTo direct success");
-        return;
+        return true;
       } catch (directErr) {
         debugLog(
           "[YouTube Digest Panel] Direct seekTo failed, falling back to relay:",
@@ -1804,8 +1817,10 @@ async function seekTo(seconds) {
       payload,
     });
     debugLog("[YouTube Digest Panel] seekTo relay result:", result);
+    return Boolean(result?.success && result.response?.success);
   } catch (error) {
     console.error("[YouTube Digest Panel] seekTo error:", error);
+    return false;
   }
 }
 

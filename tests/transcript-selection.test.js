@@ -767,3 +767,29 @@ test("sentence save follows only while reading intent and video remain unchanged
   setActiveTab('library');
   assert.equal(h.canFollowAfterSentenceSave(next),false);
 });
+
+test('click-to-seek restores scrolling, but not after manual scroll, failed seek, or selection', async () => {
+  const functionSource=source.slice(source.indexOf('async function seekFromTranscriptEntryClick('),source.indexOf('\nfunction getDisplayedTranscriptRowText'));
+  const make=()=>{
+    let resolve;
+    const calls=[];
+    const sandbox={currentVideoId:'a',digestGeneration:1,manualTranscriptScrollRevision:0,transcriptSeekRevision:0,autoScrollEnabled:false,
+      hasNonCollapsedTextSelection:()=>false,sentenceFollowSnapshot:()=>({videoId:'a',generation:1,revision:0}),
+      transcriptTabIsActive:()=>true,seekTo:()=>new Promise(r=>{resolve=r;}),
+      document:{getElementById:()=>({style:{}})},highlightActiveEntry:t=>calls.push(t),scrollToActiveEntry:b=>calls.push(b)};
+    vm.runInNewContext(functionSource,sandbox);
+    return {sandbox,calls,finish:value=>resolve(value)};
+  };
+  for (const outcome of ['success','scroll','failure','video']) {
+    const h=make();const task=h.sandbox.seekFromTranscriptEntryClick({},125);
+    if(outcome==='scroll')h.sandbox.manualTranscriptScrollRevision++;
+    if(outcome==='video')h.sandbox.currentVideoId='b';
+    h.finish(outcome!=='failure');await task;
+    assert.deepEqual(h.calls,outcome==='success'?[125,'smooth']:[]);
+    assert.equal(h.sandbox.autoScrollEnabled,outcome==='success');
+  }
+  const h=make();h.sandbox.hasNonCollapsedTextSelection=()=>true;
+  let prevented=0;
+  await h.sandbox.seekFromTranscriptEntryClick({preventDefault:()=>prevented++,stopPropagation:()=>prevented++},125);
+  assert.equal(prevented,2);assert.deepEqual(h.calls,[]);
+});

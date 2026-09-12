@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "视频英语学习开发版",
-  "version": "1.12.3",
+  "version": "1.12.4",
   "minimum_chrome_version": "116",
   "description": "支持哔哩哔哩与 YouTube：双语字幕、词句收藏、专注计时、复习和 Word 讲义。",
   "permissions": [
