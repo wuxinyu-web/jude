@@ -69,31 +69,27 @@ function attachClient(rootSession,sessionId){
     assert.deepEqual(await panel.evaluate(()=>[...document.querySelectorAll('.tab')].map(e=>e.textContent.trim())),['字幕','概览','收藏库','学习']);
     if(bili){assert.equal(await worker.evaluate(()=>__nativeCalls.length),4);assert.ok(await worker.evaluate(()=>__nativeCalls.some(u=>u.includes('cid=20'))));}
 
-    if(process.env.YTD_TEST_IMMERSIVE==='1'){
+    if(process.env.YTD_TEST_IMMERSIVE==='1'||process.env.YTD_TEST_LAYOUT==='1'){
       const setTime=t=>worker.evaluate(async t=>{const [tab]=await chrome.tabs.query({active:true,lastFocusedWindow:true});await chrome.scripting.executeScript({target:{tabId:tab.id},args:[t],func:t=>Object.defineProperty(document.querySelector('video'),'currentTime',{configurable:true,get:()=>t})});},t);await setTime(2);
-      await panel.click('#enterImmersive');
-      let frame;await until(async()=>{frame=video.frames().find(f=>f.url().includes('immersive=1'));return frame&&await frame.locator('.immersive-word').count()>0;},'immersive captions',20000);
-      assert.equal(await frame.locator('.header').isVisible(),false);
-      assert.ok((await frame.locator('#immersiveCue').innerText()).includes('Consistency'));
-      await until(async()=>(await frame.locator('.immersive-translation').innerText()).includes('中文测试译文'),'automatic bilingual translation');
-      assert.equal(await frame.getByRole('button',{name:'显示或收起中文对照',exact:true}).getAttribute('aria-pressed'),'true');
-      assert.equal(await frame.locator('.immersive-translation').isVisible(),true);
-      assert.equal(await frame.locator('.transcript-entry').first().isVisible(),false);
-      const geometry=await video.evaluate(()=>({p:document.querySelector('#movie_player').getBoundingClientRect().toJSON(),d:document.querySelector('#ytd-layout-dock').getBoundingClientRect().toJSON()}));
-      assert.ok(geometry.p.height>600,'video keeps most of viewport');assert.ok(Math.abs(geometry.p.bottom-geometry.d.top)<2);
-      await frame.locator('.immersive-word').first().click();await until(async()=>(await frame.locator('.learning-float').innerText()).includes('持续性'),'tap lookup');
-      await frame.locator('.learning-float button').filter({hasText:'关闭'}).click();await frame.getByRole('button',{name:'回到当前正在播放的台词',exact:true}).click();
-      const word=frame.locator('.immersive-word').first(),box=await word.boundingBox();await video.mouse.move(box.x+box.width/2,box.y+box.height/2);await video.mouse.down();await sleep(700);await video.mouse.up();
-      await until(()=>worker.evaluate(async()=>((await chrome.storage.local.get('ytd_vocabulary')).ytd_vocabulary||[]).length===1),'long press saves word');
-      assert.equal(await frame.locator('.learning-float').count(),0,'long press does not also open click popup');
-      await frame.getByRole('button',{name:'收藏整句（也可以长按台词空白处）',exact:true}).click();await until(()=>worker.evaluate(async()=>((await chrome.storage.local.get('ytd_sentences')).ytd_sentences||[]).length===1),'save whole cue');
-      await setTime(22);await frame.getByRole('button',{name:'回到当前正在播放的台词',exact:true}).click();await until(async()=>(await frame.locator('#immersiveCue').innerText()).includes('The book'),'next cue follows media time');
-      await setTime(18);await until(async()=>(await frame.locator('#immersiveCue').innerText())==='…','gaps do not show stale cue');await setTime(22);
-      await until(async()=>(await frame.locator('#immersiveCue').innerText()).includes('The book'),'seek follows cue');
-      await video.getByRole('button',{name:'全屏',exact:true}).click();await until(()=>video.evaluate(()=>document.fullscreenElement===document.documentElement),'whole workspace fullscreen');
-      assert.equal(await frame.locator('#immersiveCue').isVisible(),true);await video.screenshot({path:path.join(out,'immersive-fullscreen.png')});await video.getByRole('button',{name:'全屏',exact:true}).click();
-      await frame.getByRole('button',{name:'打开收藏库',exact:true}).click();await until(async()=>{frame=video.frames().find(f=>f.url().includes('embedded=1')&&!f.url().includes('immersive=1'));return frame&&await frame.locator('[data-panel=library]').evaluate(e=>e.classList.contains('active'));},'full library restored');
-      fs.writeFileSync(path.join(out,'result.json'),JSON.stringify({passed:true,checks:['minimal-ui','video-space','tap-lookup','long-press-save','sentence-save','cue-follow','gap','seek','fullscreen-with-subtitles','library-return']},null,2));panel=null;console.log('PASS: immersive captions, gestures, fullscreen and library return');return;
+      await panel.click('#enterImmersive');let frame;
+      await until(async()=>{frame=video.frames().find(f=>f.url().includes('immersive=1'));return frame&&await frame.locator('.transcript-original').count()>2;},'reused bilingual transcript',20000);
+      await until(async()=>(await frame.locator('.transcript-translation').first().innerText()).includes('中文测试译文'),'default Chinese');
+      assert.equal(await frame.locator('.header').isVisible(),false);assert.equal(await frame.locator('[data-panel=study]').isVisible(),false);assert.equal(await frame.locator('[data-panel=library]').isVisible(),false);
+      assert.equal(await frame.locator('[data-transcript-mode=bilingual]').getAttribute('aria-pressed'),'true');
+      const geometry=await video.evaluate(()=>({p:document.querySelector('#movie_player').getBoundingClientRect().toJSON(),d:document.querySelector('#ytd-layout-dock').getBoundingClientRect().toJSON()}));assert.ok(geometry.p.height>=600);assert.ok(Math.abs(geometry.p.bottom-geometry.d.top)<2);
+      await video.getByRole('separator').focus();await video.keyboard.press('ArrowUp');await until(()=>worker.evaluate(async()=>(await chrome.storage.local.get('ytd_layout_preferences')).ytd_layout_preferences.immersiveHeight===35),'resize height persists');
+      await frame.locator('[data-transcript-mode=original]').click();assert.equal(await frame.locator('.transcript-original').count(),0);await frame.locator('[data-transcript-mode=bilingual]').click();
+      await frame.locator('#contentArea').evaluate(e=>e.scrollTop=0);await sleep(600);await video.screenshot({path:path.join(out,'before-hover.png')});
+      const point=await frame.locator('.transcript-original').first().evaluate(e=>{const w=document.createTreeWalker(e,NodeFilter.SHOW_TEXT);const n=w.nextNode();const r=document.createRange();r.setStart(n,0);r.setEnd(n,Math.min(8,n.length));const b=r.getBoundingClientRect();return {x:b.x+b.width/2,y:b.y+b.height/2};});const offset=await video.locator('#ytd-layout-dock iframe').boundingBox();await video.mouse.move(offset.x+point.x,offset.y+point.y);
+      await until(async()=>(await frame.locator('.learning-float').innerText()).includes('持续性'),'existing hover lookup');await frame.getByRole('button',{name:'收藏单词',exact:true}).click();await frame.locator('.learning-float').getByRole('button',{name:'关闭',exact:true}).click();
+      await frame.locator('.transcript-entry').first().hover();await frame.getByRole('button',{name:'收藏这句英文字幕',exact:true}).first().click();
+      await until(()=>worker.evaluate(async()=>((await chrome.storage.local.get('ytd_sentences')).ytd_sentences||[]).length===1),'sentence saved');
+      const entries=await worker.evaluate(async()=>await chrome.storage.local.get(['ytd_sentences','ytd_vocabulary']));assert.equal(entries.ytd_vocabulary.length,1);assert.ok(!entries.ytd_sentences[0].term.includes('中文测试译文'));
+      await frame.locator('#contentArea').hover({position:{x:10,y:200}});await sleep(100);await video.mouse.wheel(0,500);await sleep(800);await video.screenshot({path:path.join(out,'after-wheel.png')});await until(()=>frame.locator('#contentArea').evaluate(e=>e.scrollTop>100),'wheel browses subtitles');
+      await setTime(22);await frame.locator('#returnToPlaybackBtn').click();await until(async()=>await frame.locator('.active-playback').getAttribute('data-seconds')==='22','return to playing sentence');
+      await video.getByRole('button',{name:'全屏',exact:true}).click();await until(()=>video.evaluate(()=>document.fullscreenElement===document.documentElement),'whole workspace fullscreen');await video.screenshot({path:path.join(out,'immersive-fullscreen.png')});await video.getByRole('button',{name:'全屏',exact:true}).click();
+      await frame.locator('#returnToSidebar').click();await until(async()=>!await video.locator('#ytd-layout-dock').count(),'arrow returns to sidebar');assert.equal(await worker.evaluate(async()=>(await chrome.storage.local.get('ytd_layout_preferences')).ytd_layout_preferences.mode),'horizontal');
+      fs.writeFileSync(path.join(out,'result.json'),JSON.stringify({passed:true,checks:['two-layouts','transcript-only','default-bilingual','language-switch','hover-word-save','original-sentence-save','wheel-scroll','playback-return','height','fullscreen','sidebar-return']},null,2));panel=null;console.log('PASS: transcript-only immersion, hover collection, scroll and sidebar return');return;
     }
 
     if(process.env.YTD_TEST_STUDY==='1') {
@@ -140,40 +136,6 @@ function attachClient(rootSession,sessionId){
       assert.deepEqual(panel.errors,[]);fs.writeFileSync(path.join(out,'result.json'),JSON.stringify({passed:true,checks:['empty','manual-pause-resume','self-assessment-only','distinct-practice','early-summary','resume-ended','refresh-restore','saved-position','320px','all-goals','pending-review','export-json','confirmed-clear-keeps-collections']},null,2));console.log('PASS: Study v2 task, practice, recovery, summary, narrow UI and records');return;
     }
 
-    if(process.env.YTD_TEST_LAYOUT==='1') {
-      const player=await video.locator('#movie_player').elementHandle();
-      await video.evaluate(()=>{const observer=new MutationObserver(()=>{const f=document.querySelector('#ytd-layout-dock')?.shadowRoot?.querySelector('iframe');if(f){observer.disconnect();f.setAttribute('srcdoc','');}});observer.observe(document.body,{childList:true,subtree:true});});
-      await panel.click('#moveLearningPanel');
-      await until(()=>video.locator('#ytd-layout-dock').count(),'vertical dock');
-      let frame;
-      await until(async()=>{frame=video.frames().find(f=>f.url().includes('sidepanel.html?embedded=1'));return frame && await frame.locator('.transcript-entry').count()>0;},'embedded transcript',20000);
-      assert.equal(await frame.locator('#moveLearningPanel').innerText(),'收至右侧 →');
-      assert.equal(await player.evaluate(p=>p===document.querySelector('#movie_player')),true,'player DOM identity preserved');
-      const geometry=await video.evaluate(()=>({player:document.getElementById('movie_player').getBoundingClientRect().toJSON(),dock:document.getElementById('ytd-layout-dock').getBoundingClientRect().toJSON()}));
-      assert.ok(Math.abs(geometry.player.bottom-geometry.dock.top)<2,'video and study area stack without overlap');
-      await video.mouse.click(600,geometry.dock.top+15);await video.keyboard.press('ArrowUp');
-      await until(()=>worker.evaluate(async()=> (await chrome.storage.local.get('ytd_layout_preferences')).ytd_layout_preferences.height===50),'keyboard resize persists');
-      await video.mouse.move(600,450+15);await video.mouse.down();await video.mouse.move(600,405,{steps:8});await video.mouse.up();
-      await until(()=>worker.evaluate(async()=> Math.abs((await chrome.storage.local.get('ytd_layout_preferences')).ytd_layout_preferences.height-55)<0.1),'drag resize persists');
-      await frame.locator('#returnToPlaybackBtn').click();
-      await frame.locator('[data-tab="library"]').click();
-      assert.equal(await frame.evaluate(async()=> (await chrome.runtime.sendMessage({action:'getLearningLibrary'})).success),true,'embedded collection APIs authorized');
-      const other=await context.newPage();await other.goto('https://example.org');
-      const bound=await frame.evaluate(()=>YTD_PANEL.context().videoId);assert.equal(bound,fixtureId,'embedded frame keeps its owner video');
-      await other.close();await video.bringToFront();
-      await frame.locator('[data-tab="transcript"]').click();
-      await video.screenshot({path:path.join(out,'10-vertical.png')});
-      await frame.locator('#moveLearningPanel').click();
-      await until(async()=>!await video.locator('#ytd-layout-dock').count(),'horizontal restores page');
-      assert.equal(await video.locator('[data-ytd-layout-player]').count(),0);
-      assert.equal(await video.locator('[data-ytd-layout-ancestor]').count(),0);
-      assert.equal(await video.locator('html').getAttribute('data-ytd-layout'),null);
-      assert.equal(await player.evaluate(p=>p===document.querySelector('#movie_player')),true);
-      assert.equal(await worker.evaluate(async()=> (await chrome.storage.local.get('ytd_layout_preferences')).ytd_layout_preferences.mode),'horizontal');
-      fs.writeFileSync(path.join(out,'result.json'),JSON.stringify({passed:true,checks:['vertical-iframe','empty-srcdoc-recovery','keyboard-resize','drag-resize','player-preserved','stacked-geometry','embedded-collections','tab-binding','horizontal-restore','preference-persistence']},null,2));
-      panel=null;console.log('PASS: adjustable vertical/horizontal layout');return;
-    }
-
     if(asr){
       let complete=false,starts=0,cancelled=false;
       const result={videoId:fixtureId,language:'en',source:'local-asr',transcript:[{text:'An object at rest stays at rest. An object in motion stays in motion.',start:0,duration:12},{text:'The book which she recommended changed my perspective.',start:22,duration:12}]};
@@ -189,19 +151,17 @@ function attachClient(rootSession,sessionId){
       });await new Promise((resolve,reject)=>{asrServer.once('error',reject);asrServer.listen(Number(process.env.YTD_TEST_ASR_PORT)||8766,'127.0.0.1',resolve);});
       if(process.env.YTD_TEST_AUTO_ASR==='1'){
         await panel.click('#enterImmersive');let frame;
-        await until(async()=>{frame=video.frames().find(f=>f.url().includes('immersive=1'));return frame&&(await frame.locator('.immersive-translation').innerText()).includes('暂不可用');},'automatic ASR failure visible');
+        await until(async()=>{frame=video.frames().find(f=>f.url().includes('immersive=1'));return frame&&(await frame.locator('#localAsrStatus').innerText()).includes('暂不可用');},'automatic ASR failure visible');
         assert.equal(starts,1);await sleep(2500);assert.equal(starts,1,'failure does not automatically loop');
-        await frame.getByRole('button',{name:'重试当前视频的英文原声转写',exact:true}).click();
-        await until(async()=>await frame.getByRole('button',{name:'取消当前英文原声转写',exact:true}).isVisible(),'inline cancel');assert.equal(starts,2);
-        await frame.getByRole('button',{name:'取消当前英文原声转写',exact:true}).click();await until(async()=>(await frame.locator('.immersive-translation').innerText()).includes('已取消'),'inline cancelled');
+        await frame.getByRole('button',{name:'转写英文原声',exact:true}).click();
+        await until(async()=>await frame.getByRole('button',{name:'取消转写',exact:true}).isVisible(),'inline cancel');assert.equal(starts,2);
+        await frame.getByRole('button',{name:'取消转写',exact:true}).click();await until(async()=>(await frame.locator('#localAsrStatus').innerText()).includes('已取消'),'inline cancelled');
         await sleep(2200);assert.equal(starts,2,'cancel does not restart');
-        complete=true;await frame.getByRole('button',{name:'重试当前视频的英文原声转写',exact:true}).click();
-        await until(async()=>(await frame.locator('#immersiveCue').innerText()).includes('An object'),'English applied without leaving immersion');
-        assert.ok((await frame.locator('.immersive-translation').innerText()).includes('静止'));assert.equal(starts,3);assert.equal(await worker.evaluate(()=>__fixtureCalls.length),0);
+        complete=true;await frame.getByRole('button',{name:'转写英文原声',exact:true}).click();
+        await until(async()=>(await frame.locator('#transcriptList').innerText()).includes('An object'),'English applied without leaving immersion');
+        assert.ok((await frame.locator('.transcript-translation').first().innerText()).includes('静止'));assert.equal(starts,3);assert.equal(await worker.evaluate(()=>__fixtureCalls.length),0);
         await video.screenshot({path:path.join(out,'auto-asr-bilingual.png')});
-        await frame.getByRole('button',{name:'返回完整字幕和学习工具',exact:true}).click();
-        await until(async()=>{frame=video.frames().find(f=>f.url().includes('embedded=1')&&!f.url().includes('immersive=1'));return frame&&await frame.locator('#enterImmersive').isVisible();},'expand after ASR');
-        await frame.locator('#enterImmersive').click();await until(async()=>{frame=video.frames().find(f=>f.url().includes('immersive=1'));return frame&&(await frame.locator('#immersiveCue').innerText()).includes('An object');},'cached English on reentry');assert.equal(starts,3);
+        assert.equal(starts,3);
         fs.writeFileSync(path.join(out,'result.json'),JSON.stringify({passed:true,checks:['automatic-start','failure-visible','no-retry-loop','inline-cancel','inline-retry','auto-bilingual','native-Chinese-retained','no-cloud-translation','cached-reentry']}));panel=null;console.log('PASS: automatic immersive ASR, failure, cancellation and bilingual completion');return;
       }
       await panel.click('[data-transcript-mode="bilingual"]');

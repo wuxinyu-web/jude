@@ -43,7 +43,7 @@ let closeActiveExplanationModal = null;
 // --- Translation state ---
 // The public transcript control intentionally supports only the original
 // subtitles, Chinese, and an aligned source + Chinese view.
-let currentTranscriptMode = "original";
+let currentTranscriptMode = /[?&]immersive=1(?:&|$)/.test(globalThis.location?.search||"") ? "bilingual" : "original";
 let currentOverviewMode = "original";
 let translationGeneration = 0; // Invalidates responses from older UI modes/videos.
 let translationWorkCount = 0;
@@ -1372,13 +1372,22 @@ function addTranscriptRowActions(row, segment) {
   const saveButton = document.createElement("button");
   saveButton.className = "transcript-row-action transcript-row-save";
   saveButton.type = "button";
-  saveButton.textContent = "收藏";
+  const immersive = /[?&]immersive=1(?:&|$)/.test(globalThis.location?.search||"");
+  saveButton.textContent = immersive ? "收藏句子" : "收藏";
   saveButton.setAttribute(
     "aria-label",
-    "将这段字幕收藏为词条",
+    immersive ? "收藏这句英文字幕" : "将这段字幕收藏为词条",
   );
   bindTranscriptRowAction(saveButton, row, segment, async (metadata) => {
-    await saveVocabularySelection(metadata, saveButton);
+    if(!immersive){await saveVocabularySelection(metadata, saveButton);return;}
+    saveButton.disabled=true;
+    try{
+      const r=await chrome.runtime.sendMessage({action:'saveSentence',...metadata,term:segment.text,sourceExcerpt:segment.text,context:segment.text,timestamp:segment.start});
+      if(!r?.success)throw new Error(r?.error||'收藏失败，请重试。');
+      saveButton.textContent=r.alreadySaved?'已收藏':'已收藏 ✓';
+      void globalThis.YTD_LEARNING_UI?.refreshLibrary();
+      if(!r.alreadySaved)void chrome.runtime.sendMessage({action:'analyzeSentence',id:r.entry.id}).then(result=>{if(!result?.success)saveButton.title='原句已收藏；解析可到收藏库重试。';}).catch(()=>{});
+    }catch(e){saveButton.disabled=false;saveButton.textContent='重试收藏';saveButton.title=e.message;}
   });
 
   actions.append(explainButton, saveButton);
@@ -4108,6 +4117,7 @@ function retryTranslationSegment(index, generation) {
  * remaining rows. Batches are sequential so the provider is never flooded.
  */
 async function translateTranscript() {
+  setTranscriptModeButtons(currentTranscriptMode);
   if(/^(ai-)?zh(?:-|$)/i.test(currentTranscriptLanguage||"")) {currentTranscriptMode="original";setTranscriptModeButtons("original");renderTranscript();return;}
   if(currentTranscriptSource==="local-asr" && /^(ai-)?zh(?:-|$)/i.test(currentNativeTranscriptBackup?.language||"")){
     translationGeneration++;transcriptScrollObserver?.disconnect();transcriptScrollObserver=null;
@@ -4281,6 +4291,7 @@ globalThis.YTD_PANEL = {
   context: () => ({ videoId: currentVideoId, videoTitle: currentVideoTitle,
     channelName: currentChannelName, tabId: youtubeTabId, generation: digestGeneration,
     segments: getActiveTranscriptSegments(), libraryView: currentLibraryView, source:currentTranscriptSource, language:currentTranscriptLanguage, hasNativeBackup:Boolean(currentNativeTranscriptBackup) }),
+  setTranscriptMode:handleTranscriptModeChange,
   rawSegments:()=>currentTranscript||[],
   captionTranslation:segment=>{
     if(currentNativeTranscriptBackup && /^(ai-)?zh/i.test(currentNativeTranscriptBackup.language||""))return YTD_ASR_CORE.alignChinese(segment,currentNativeTranscriptBackup.transcript);

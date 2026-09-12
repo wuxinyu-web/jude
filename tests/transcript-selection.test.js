@@ -671,7 +671,7 @@ test("every semantic transcript row exposes keyboard Explain and Save actions", 
   );
   assert.match(
     source,
-    /className = "[^"]*transcript-row-save"[\s\S]*?setAttribute\(\s*"aria-label",\s*"将这段字幕收藏为词条"/,
+    /className = "[^"]*transcript-row-save"[\s\S]*?setAttribute\(\s*"aria-label",[\s\S]*?"将这段字幕收藏为词条"/,
   );
   assert.match(
     source,

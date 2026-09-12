@@ -61,21 +61,17 @@ body:has(.tab.active[data-tab="study"]) #localAsrPanel{display:none!important}
 
 .study-day span:last-child{white-space:nowrap;font-size:10px}
 
-/* A quiet subtitle strip: all study/library tools remain one action away. */
-html.immersive,html.immersive body{background:#121313!important;color:#f4f1e9;height:100%;overflow:hidden}
-html.immersive body>.header,html.immersive #contentArea,html.immersive #followPlaybackBtn{display:none!important}
-.immersive-stage{height:100%;display:flex;flex-direction:column;box-sizing:border-box;padding:4px clamp(12px,4vw,64px) 6px;min-height:0}
-.immersive-toolbar{display:flex;align-items:center;justify-content:flex-end;gap:9px;min-height:28px;flex:none;color:#a4aaa3;font-size:11px}
-.immersive-toolbar button{background:transparent;border:0;color:#b8c0b6;font:inherit;cursor:pointer;padding:4px 6px;border-radius:4px}.immersive-toolbar button:hover,.immersive-toolbar button[aria-pressed=true]{background:#2e3730;color:#fff}.immersive-time{margin-right:auto;font-variant-numeric:tabular-nums}
-.immersive-caption{flex:1;min-height:0;overflow:auto;align-content:center;text-align:center;scrollbar-width:thin;scrollbar-color:#465046 transparent}
-.immersive-cue{font-size:clamp(19px,2.1vw,30px);font-weight:450;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;padding:7px 6px;transition:opacity .12s}
-.immersive-word{appearance:none;display:inline;background:none;color:inherit;border:0;border-radius:3px;padding:0;font:inherit;line-height:inherit;cursor:pointer;touch-action:pan-y;user-select:none}.immersive-word:hover{background:#344538;color:#e1f0d7}.immersive-word:focus-visible,.immersive-toolbar button:focus-visible{outline:2px solid #b2ca9c;outline-offset:3px}
-.immersive-translation{font-size:clamp(12px,1.2vw,16px);color:#aeb6aa;line-height:1.6;margin:3px 0 9px}.immersive-status{font-size:11px;color:#c3d3b7;line-height:1.3;margin:0;min-height:15px;text-align:center}
-html.immersive .learning-float{max-height:calc(100vh - 16px);background:#202622;color:#f2f2ea;border-color:#55654e}.immersive-stage .learning-muted{color:#bec6b8}
-@media(max-width:420px){.immersive-stage{padding-inline:8px}.immersive-toolbar{gap:2px;font-size:10px}.immersive-cue{font-size:19px}}
-@media(prefers-reduced-motion:reduce){.immersive-cue{transition:none}}
 
-/* Direct, contextual workspace actions instead of a three-mode picker. */
-.layout-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.layout-actions button{font:inherit;font-size:12px;border:1px solid #e6ddd0;border-radius:18px;background:transparent;color:#746b5f;padding:7px 11px;cursor:pointer;white-space:nowrap}.layout-actions .layout-watch{background:#c5684d;border-color:#c5684d;color:#fff}.layout-actions button:hover{filter:brightness(.96)}.layout-actions button:focus-visible{outline:2px solid #53714e;outline-offset:3px}.layout-actions button:disabled{opacity:.6;cursor:wait}
-html.immersive .immersive-translation{font-size:clamp(14px,1.35vw,19px);color:#cad0c6;margin:3px 0 8px}
-@media(max-width:420px){.layout-actions{gap:4px}.layout-actions button{font-size:11px;padding:6px 9px}.header-top .video-info{flex-basis:100%}}
+/* The same transcript UI in a compact, resizable dark dock. */
+.layout-actions{display:flex;gap:6px}.layout-actions button{font:inherit;font-size:18px;background:transparent;border:1px solid #e6ddd0;color:#c5684d;border-radius:50%;width:34px;height:34px;cursor:pointer}.layout-actions button:focus-visible{outline:2px solid #53714e;outline-offset:3px}
+html.immersive{--bg:#121313;--surface:#1b1e1b;--surface-raised:#202520;--text-secondary:#c1c8bb;--accent-dim:#273223;--surface-hover:#293129;--text:#edece6;--text-muted:#bbc1b7;--text-light:#9ca695;--border:#353d33;--accent:#b3c59f;--accent-light:#273223;--accent-bg:#273223;background:#121313}
+html.immersive body{background:#121313;color:#edece6;height:100vh;overflow:hidden}
+html.immersive body>.header,html.immersive #tabsNav,html.immersive .section-title,html.immersive .transcript-search,html.immersive #transcriptSourceBadge,html.immersive #copyTranscriptBtn,html.immersive #exportTranscriptBtn,html.immersive #localAsrRestore,html.immersive #followPlaybackBtn{display:none!important}
+html.immersive #contentArea{height:100vh;max-height:none;overflow:auto;padding:0 12px 20px;scrollbar-width:thin;scrollbar-color:#596451 #121313}
+html.immersive .section{padding:0;margin:0}html.immersive .sticky-control-row{top:0;background:#121313;padding:7px 0;z-index:20;gap:8px;flex-wrap:wrap}
+html.immersive .transcript-entry{padding:14px 8px;gap:16px;border-radius:7px}html.immersive .transcript-copy,html.immersive .transcript-text{font-size:clamp(16px,1.65vw,24px);line-height:1.6;min-width:0;overflow-wrap:anywhere}
+html.immersive .transcript-translation{font-size:clamp(14px,1.25vw,19px);color:#c3cbbd;border-color:#353d33}html.immersive .transcript-entry.active-playback{background:#273223}
+html.immersive .transcript-row-action{font-size:11px;padding:5px 9px}html.immersive .transcript-time{color:#b3c59f}
+html.immersive .learning-float{max-height:calc(100vh - 16px);background:#202622;color:#f2f2ea;border-color:#55654e}
+html.immersive:not([data-awaiting-english]) #localAsrPanel{display:none!important}html.immersive #localAsrPanel{margin:4px 0;padding:8px;font-size:12px;background:#202622}html.immersive #localAsrStatus{margin:4px 0}
+@media(max-width:480px){html.immersive .transcript-entry{gap:6px;padding:10px 2px}html.immersive #contentArea{padding-inline:6px}html.immersive .transcript-row-actions{min-width:48px}html.immersive .transcript-actions{gap:4px}}

@@ -71,3 +71,8 @@ The panel exposes direct immersive entry and context-dependent dock positioning;
 ## 1.9.2 自动原声准备
 
 Immersive Chinese-only detection calls local-asr ensureAutomatic once per video. It awaits saved-job restoration, reuses completed/running jobs, and stores a session attempt marker to prevent repeated failure starts across iframe recreation. Progress events reuse local-asr polling; inline cancel/retry use the same controller as the full panel. Auto-applied ASR retains the native Chinese backup and existing video/generation checks.
+
+
+## 1.10.0 shared transcript immersion
+
+Immersion now shows the existing transcript pane, with its shared rendering, bilingual translation queue, scroll tracking, hover/selection capture and collection messages. The parallel single-cue renderer/queue has been removed. It adds no timers. The narrow YTD_PANEL bridge exposes transcript mode switching after ASR application. Only the sidebar exposes other panels. Legacy vertical preferences normalize to immersive; the dock retains the player DOM and resize/fullscreen handling. Sentence-row actions in immersion save the original segment text only, while sidebar row behavior remains compatible.

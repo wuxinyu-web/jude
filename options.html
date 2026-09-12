@@ -3,7 +3,7 @@
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>视频英语学习 · 设置</title><link rel="stylesheet" href="options.css"></head>
 <body><main class="settings-shell">
 <header><div class="eyebrow">视频英语学习</div><h1>学习设置</h1><p class="lede">支持哔哩哔哩与 YouTube。密钥和学习资料保存在当前 Chrome 用户配置中。</p></header>
-<section class="card"><h2>学习区布局</h2><label class="layout-control">布局 <select id="learningLayout" aria-label="学习区布局"><option value="horizontal">左右布局</option><option value="vertical">上下布局</option><option value="immersive">沉浸模式</option></select></label><span id="layoutStatus" role="status" aria-live="polite"></span><p class="help">左右布局使用浏览器侧栏；上下布局在视频下方显示学习区，分隔线可拖动调整高度。选择后自动保存。</p></section>
+<section class="card"><h2>学习区布局</h2><label class="layout-control">布局 <select id="learningLayout" aria-label="学习区布局"><option value="horizontal">左右布局</option><option value="immersive">沉浸模式</option></select></label><span id="layoutStatus" role="status" aria-live="polite"></span><p class="help">左右布局使用浏览器侧栏；沉浸模式只在视频下方显示字幕，分隔线可拖动调整高度。选择后自动保存。</p></section>
 <form id="settingsForm">
 <section class="card"><h2>哔哩哔哩字幕</h2><p class="help">直接读取 B 站提供的字幕，优先英文字幕，不需要 Supadata 密钥。部分字幕需要先在当前浏览器登录 B 站。没有可读取的字幕轨时会明确提示，不会自动转写视频。</p></section>
 <section class="card"><h2>YouTube 字幕（可选）</h2><label for="supadataApiKey">Supadata API 密钥</label><input id="supadataApiKey" name="supadataApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="仅在使用 YouTube 时填写"><p class="help">用于获取 YouTube 时间轴字幕。<a href="https://dash.supadata.ai/auth/sign-up" target="_blank" rel="noreferrer">注册并获取 Supadata 密钥</a>。无字幕时，只有经过确认才会请求音频转写。</p></section>
