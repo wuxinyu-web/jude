@@ -10,8 +10,7 @@ import subprocess
 import time
 from server import read_json, write_json, VIDEO
 
-MAX_SECONDS = 180 * 60
-MAX_BYTES = 300 * 1024 * 1024
+from audio_download import MAX_SECONDS, MAX_BYTES, TranscriptionError, download_audio
 
 def main():
     parser = argparse.ArgumentParser()
@@ -37,37 +36,11 @@ def main():
         import imageio_ffmpeg
         import numpy as np
         import mlx_whisper
-        from yt_dlp import YoutubeDL
         video_id = status['videoId']
         if not VIDEO.fullmatch(video_id):
             raise ValueError('无效视频编号。')
-        bvid, _, page = video_id.partition('_p')
-        url = f'https://www.bilibili.com/video/{bvid}/' + (f'?p={page}' if page else '')
         update('downloading', '正在读取当前视频的英文原声（不会上传音频）', 0)
-        def progress(data):
-            downloaded = data.get('downloaded_bytes', 0)
-            if downloaded > MAX_BYTES:
-                raise ValueError('音频超过 300 MB，请选择较短的视频。')
-            total = data.get('total_bytes') or data.get('total_bytes_estimate') or 0
-            update('downloading', '正在下载原声音频到本机', min(15, round(downloaded / total * 15)) if total else 0)
-        def filter_video(info, *, incomplete=False):
-            if info.get('is_live'):
-                return '暂不支持直播。'
-            if (info.get('duration') or 0) > MAX_SECONDS:
-                return '本地转写暂限 180 分钟以内的视频。'
-        options = {'format':'bestaudio[ext=m4a]/bestaudio', 'outtmpl':str(folder/'audio.%(ext)s'),
-            'noplaylist':True, 'playlist_items':page or '1', 'quiet':True, 'no_warnings':True,
-            'socket_timeout':20, 'retries':2, 'fragment_retries':2, 'max_filesize':MAX_BYTES,
-            'match_filter':filter_video, 'progress_hooks':[progress], 'cachedir':False}
-        with YoutubeDL(options) as ydl:
-            info = ydl.extract_info(url, download=True)
-            if not info:
-                raise ValueError('无法读取这个视频的原声，请确认视频可正常公开播放。')
-            if info.get('entries'):
-                info = list(info['entries'])[0]
-            audio_path = Path(ydl.prepare_filename(info))
-        if not audio_path.is_file() or audio_path.stat().st_size > MAX_BYTES:
-            raise ValueError('音频下载未完成或超过大小限制。')
+        info, audio_path = download_audio(folder, video_id, update)
         update('decoding', '正在解码原声', 16)
         decoded = subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), '-nostdin','-v','error','-i',str(audio_path),
             '-t',str(MAX_SECONDS+1),'-f','f32le','-ac','1','-ar','16000','pipe:1'], capture_output=True, check=True, timeout=360)
@@ -121,7 +94,12 @@ def main():
     except Exception as error:
         # Do not send provider URLs, local paths or raw diagnostics to the browser.
         print(type(error).__name__, str(error), flush=True)
-        update('failed', '原声转写失败。请确认视频公开可播放、网络正常及模型已安装；详细原因见本地 worker.log。')
+        if isinstance(error, TranscriptionError):
+            status['errorCode'] = error.code
+            update('failed', str(error))
+        else:
+            status['errorCode'] = 'TRANSCRIPTION_FAILED'
+            update('failed', '原声解码或识别失败；请重试。若仍失败，请检查本地 worker.log。')
     finally:
         for path in folder.glob('audio*'):
             if path.is_file():
