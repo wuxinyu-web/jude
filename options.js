@@ -95,3 +95,7 @@ async function resetAllData() {
   await loadSettings();
   dataStatus.textContent = "已清空本扩展的全部本地数据。";
 }
+
+async function studyData(action){const r=await chrome.runtime.sendMessage({action});if(!r?.success)throw new Error(r?.error||"操作失败，请重试。");return r;}
+document.getElementById("exportStudyBtn").addEventListener("click",async()=>{try{const r=await studyData("exportStudy"),url=URL.createObjectURL(new Blob([JSON.stringify(r.data,null,2)],{type:"application/json"}));const a=document.createElement("a");a.href=url;a.download="英语学习记录.json";a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);document.getElementById("studyDataStatus").textContent="学习记录已导出。";}catch(e){document.getElementById("studyDataStatus").textContent=e.message;}});
+document.getElementById("clearStudyBtn").addEventListener("click",async()=>{if(!window.confirm("确认清空全部学习任务、时长与练习进度？收藏的词句、笔记和收藏库自评会保留。"))return;try{await studyData("clearStudy");document.getElementById("studyDataStatus").textContent="学习记录已清空，收藏与笔记已保留。";}catch(e){document.getElementById("studyDataStatus").textContent=e.message;}});

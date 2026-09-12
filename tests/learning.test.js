@@ -110,13 +110,12 @@ test("interacting during buffering or seeking cannot turn playback stalls into s
     assert.equal(s.watchMs,0);assert.equal(s.activityMs,0);
   }
 });
-test("activity, watching and review are mutually exclusive; deadline credit is capped exactly",()=>{
+test("priority is review then activity then watching; deadline never caps time or pauses task",()=>{
   let s=C.makeSession({...input,minutes:1},0,"s");s.targetMs=3000;
-  s=C.tickSession(s,{...sample,activityActive:true},0,"boot");s=C.tickSession(s,{...sample,activityActive:true},2000,"boot");
-  assert.equal(s.watchMs,2000);assert.equal(s.activityMs,0);
-  s=C.tickSession(s,{...sample,playing:false,activityActive:true},3000,"boot");s=C.tickSession(s,{...sample,playing:false,activityActive:true},5000,"boot");
-  assert.equal(s.activityMs,1000);assert.equal(s.status,"due");
-  s={...s,status:"review",lastSample:null};s=C.tickSession(s,{...sample,reviewActive:true},6000,"boot");s=C.tickSession(s,{...sample,reviewActive:true},8000,"boot");assert.equal(s.reviewMs,2000);assert.equal(s.watchMs+s.activityMs,3000);
+  s=C.tickSession(s,{...sample,activityActive:true},1000,"boot");s=C.tickSession(s,{...sample,activityActive:true},3000,"boot");
+  assert.equal(s.watchMs,0);assert.equal(s.activityMs,2000);
+  s=C.tickSession(s,{...sample,activityActive:true,reviewActive:true},4000,"boot");s=C.tickSession(s,{...sample,activityActive:true,reviewActive:true},6000,"boot");
+  assert.equal(s.reviewMs,2000);assert.equal(C.totalMs(s),4000);assert.equal(s.status,"running");assert.equal(C.progress(s).remaining,0);assert.equal(C.progress(s).allMet,false);
 });
 test("daily summaries split time across midnight and return exactly seven local days",()=>{
   const midnight=new Date(2026,8,12).getTime();let s=C.makeSession(input,midnight-1000,"s");
@@ -143,10 +142,10 @@ test("unrelated panel views cannot accrue transcript activity even after a recen
   await h.service.pulse({...sample,visible:true,playing:false},7);
   assert.equal((await h.service.getStudy()).current.activityMs,0);
 });
-test("switching videos pauses the bound session; resume requires returning to its original tab",async()=>{
+test("switching videos pauses the bound session; resume requires the same video and explicitly rebinds a foreground tab",async()=>{
   const h=harness();await h.service.studyCommand({...input,command:"start"});h.setEnv({videoId:"other12345"});await h.service.pulse({...sample,visible:true},7);
   assert.equal((await h.service.getStudy()).current.status,"paused");await assert.rejects(h.service.studyCommand({...input,command:"resume"}));
-  h.setEnv({videoId:input.videoId});await assert.rejects(h.service.studyCommand({...input,tabId:8,command:"resume"}));await h.service.studyCommand({...input,command:"resume"});
+  h.setEnv({videoId:input.videoId});await h.service.studyCommand({...input,tabId:8,command:"resume"});assert.equal((await h.service.getStudy()).current.tabId,8);await h.service.studyCommand({...input,command:"resume"});
   assert.equal((await h.service.getStudy()).current.status,"running");
 });
 test("collection goals use distinct newly saved IDs of the bound video; end preserves summary",async()=>{
@@ -155,8 +154,66 @@ test("collection goals use distinct newly saved IDs of the bound video; end pres
 });
 test("release contains Study instead of Ask and no web-search permission",()=>{
   const root=path.resolve(__dirname,"..");const manifest=JSON.parse(fs.readFileSync(path.join(root,"manifest.json")));
-  assert.match(manifest.name,/开发版/);assert.equal(manifest.version,"1.7.0");assert.equal(manifest.host_permissions.length,7);
+  assert.match(manifest.name,/开发版/);assert.equal(manifest.version,"1.8.0");assert.equal(manifest.host_permissions.length,7);
   const html=fs.readFileSync(path.join(root,"sidepanel.html"),"utf8");assert.match(html,/data-tab="study"/);assert.doesNotMatch(html,/data-tab="ask"/);
   const bg=fs.readFileSync(path.join(root,"background.js"),"utf8");assert.doesNotMatch(bg,/action === "(?:askVideo|suggestVideoQuestions)"/);
   assert.equal(fs.existsSync(path.join(root,"prompts/ask.md")),false);
+});
+
+test("legacy collections remain collections and never fabricate practice outcomes",()=>{
+  const d=C.normalizeStudy({currentId:"old",sessions:[{id:"old",startedAt:1000,status:"review",wordIds:["w1"],watchMs:12,practicedWordIds:["fake"]}]},2000);
+  assert.equal(d.schemaVersion,2);assert.deepEqual(d.sessions[0].wordIds,["w1"]);assert.deepEqual(d.sessions[0].practicedWordIds,[]);assert.equal(d.sessions[0].watchMs,12);assert.equal(d.sessions[0].status,"paused");
+});
+test("manual pause survives playback, foreground and review events until explicit resume",async()=>{
+  const h=harness();await h.service.studyCommand({...input,command:"start"});await h.service.pulse({...sample,visible:true},7);h.advance(1000);await h.service.pulse({...sample,visible:true},7);
+  await h.service.studyCommand({...input,command:"pause"});h.advance(1000);await h.service.pulse({...sample,visible:true},7);h.advance(1000);await h.service.pulse({...sample,visible:true},7);
+  let s=(await h.service.getStudy()).current;assert.equal(s.status,"paused");assert.equal(s.watchMs,1000);
+  await h.service.studyCommand({...input,command:"resume"});await h.service.pulse({...sample,visible:true},7);h.advance(1000);await h.service.pulse({...sample,visible:true},7);assert.equal((await h.service.getStudy()).current.watchMs,2000);
+});
+test("refresh document ID pauses; restart and reopening restore progress without offline credit",async()=>{
+  const h=harness();await h.service.studyCommand({...input,command:"start"});await h.service.pulse({...sample,visible:true,documentId:"doc1",position:30},7);h.advance(1000);await h.service.pulse({...sample,visible:true,documentId:"doc1",position:31},7);
+  await h.service.pulse({...sample,visible:true,documentId:"doc2",position:0},7);let s=(await h.service.getStudy()).current;assert.equal(s.status,"paused");assert.equal(s.pauseReason,"restore");assert.equal(s.position,31);assert.equal(s.watchMs,1000);
+  await h.service.studyCommand({...input,command:"resume"});const restarted=harness({data:h.data});s=(await restarted.service.getStudy()).current;assert.equal(s.status,"paused");assert.equal(s.watchMs,1000);
+});
+test("review and subtitle activity expire at 60 seconds; passive pings do not renew them",async()=>{
+  for(const mode of ["review","activity"]){const h=harness();await h.service.studyCommand({...input,command:"start"});await h.service.panelActivity({...input,[mode]:true,interaction:true});
+    const v={...sample,visible:true,playing:false};await h.service.pulse(v,7);h.advance(1000);await h.service.pulse(v,7);const key=mode==="review"?"reviewMs":"activityMs";assert.equal((await h.service.getStudy()).current[key],1000);
+    h.advance(59000);await h.service.panelActivity({...input,[mode]:true});await h.service.pulse(v,7);h.advance(1000);await h.service.pulse(v,7);assert.equal((await h.service.getStudy()).current[key],1000);
+  }
+});
+test("offline, duplicate events and another tab cannot add time; foreground resumes automatically",async()=>{
+  const h=harness();await h.service.studyCommand({...input,command:"start"});const v={...sample,visible:true};await h.service.pulse(v,7);h.advance(1000);
+  await Promise.all([h.service.pulse(v,7),h.service.pulse(v,7),h.service.pulse(v,8)]);assert.equal((await h.service.getStudy()).current.watchMs,1000);
+  await h.service.pulse({...v,online:false},7);h.advance(1000);await h.service.pulse({...v,online:false},7);assert.equal((await h.service.getStudy()).current.watchMs,1000);
+  h.setEnv({foreground:false});await h.service.pulse(v,7);h.advance(1000);await h.service.pulse(v,7);h.setEnv({foreground:true});await h.service.pulse(v,7);h.advance(1000);await h.service.pulse(v,7);assert.equal((await h.service.getStudy()).current.watchMs,2000);
+});
+test("distinct practice goals require self-assessment, repeated practice updates pending only",async()=>{
+  const h=harness({data:{ytd_vocabulary:[{id:"w1",videoId:input.videoId}],ytd_sentences:[{id:"s1",videoId:input.videoId}]}});
+  await h.service.studyCommand({...input,command:"start",wordGoal:1,sentenceGoal:1});await h.service.addCollection("word","w1",input.videoId);let s=(await h.service.getStudy()).current;assert.equal(C.progress(s).words,0);
+  await h.service.markReview({id:"w1",result:"unsure",sessionId:s.id,tabId:7});await h.service.markReview({id:"w1",result:"again",sessionId:s.id,tabId:7});
+  s=(await h.service.getStudy()).current;assert.equal(C.progress(s).words,1);assert.equal(C.progress(s).pending,1);
+  await h.service.markReview({id:"w1",result:"known",sessionId:s.id,tabId:7});await h.service.markReview({id:"s1",result:"known",sessionId:s.id,tabId:7});
+  s=(await h.service.getStudy()).current;assert.equal(C.progress(s).pending,0);assert.equal(C.progress(s).sentences,1);assert.equal(C.progress(s).allMet,false);
+  h.data.ytd_study.sessions[0].watchMs=s.targetMs;assert.equal(C.progress((await h.service.getStudy()).current).allMet,true);
+  await h.service.studyCommand({...input,command:"pause"});await assert.rejects(h.service.markReview({id:"w1",result:"known",sessionId:s.id,tabId:7}));
+});
+test("early end keeps real progress; continue restores same task; export and clear exclude collections",async()=>{
+  const word={id:"w1",videoId:input.videoId};const h=harness({data:{ytd_vocabulary:[word],ytd_notes:[{id:"n1"}]}});await h.service.studyCommand({...input,command:"start"});
+  await h.service.studyCommand({...input,command:"end"});const s=(await h.service.getStudy()).current;assert.equal(C.progress(s).allMet,false);
+  await h.service.studyCommand({...input,command:"resume"});assert.equal((await h.service.getStudy()).current.id,s.id);
+  const exported=await h.service.exportStudy();assert.equal(exported.data.schemaVersion,2);assert.equal(exported.data.sessions[0].runtimeBoot,undefined);
+  await h.service.clearStudy();assert.equal((await h.service.getStudy()).current,null);assert.deepEqual(h.data.ytd_vocabulary,[word]);assert.deepEqual(h.data.ytd_notes,[{id:"n1"}]);
+});
+test("90 day retention removes expired records even without starting a new task",()=>{
+  const now=100*86400000,d=C.normalizeStudy({currentId:"old",sessions:[{id:"old",startedAt:0},{id:"new",startedAt:now-1}]},now);assert.equal(d.currentId,null);assert.equal(d.sessions.length,1);
+});
+
+test("resume before deadline does not dismiss the future time prompt; legacy position remains unknown",async()=>{
+  const h=harness();await h.service.studyCommand({...input,command:"start"});await h.service.studyCommand({...input,command:"pause"});await h.service.studyCommand({...input,command:"resume"});assert.equal((await h.service.getStudy()).current.timeAcknowledged,false);
+  const old=C.normalizeStudy({sessions:[{id:"old",startedAt:1000,wordIds:[],sentenceIds:[]}]},2000).sessions[0];assert.equal(old.positionKnown,false);
+});
+
+test("reopening the study panel preserves progress and requires explicit continuation",async()=>{
+  const h=harness();await h.service.studyCommand({...input,command:"start"});await h.service.panelOpened({...input});let s=(await h.service.getStudy()).current;assert.equal(s.status,"paused");assert.equal(s.pauseReason,"restore");assert.equal(s.restorePlayback,false);
+  await h.service.studyCommand({...input,command:"resume"});assert.equal((await h.service.getStudy()).current.status,"running");
 });

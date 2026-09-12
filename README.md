@@ -1,3 +1,5 @@
+1.8.0 adds practice-based study goals, mutually exclusive timing, explicit continuation, summaries and local record management.
+
 > 1.7.0：新增「布局」选择，支持左右侧栏或上下学习区。上下布局保持视频在上，学习区在下，拖动分隔线可调整高度；布局和高度保存在本机，关闭学习区恢复原网页。
 
 > 1.6.1：字幕工具栏改为「回到播放位置」，每次点击读取当前视频时间并定位，暂停时也可用；定位失败会提示刷新视频页面。
@@ -10,7 +12,7 @@ Bilibili now offers explicit local Whisper transcription of English audio. Chine
 
 The entire interface and settings are Simplified Chinese. Bilibili native captions require no Supadata key; English tracks are preferred, and missing captions or login requirements are explicit. Part numbers remain distinct in caches, collections, sessions and DOCX links. YouTube support and existing stored data remain compatible.
 
-A persistent follow-playback toggle immediately recenters the current caption after manual scrolling. Study time displays minutes and seconds with one-second updates, without counting background or paused-study time.
+The return-to-playback-position button immediately recenters the current caption after manual scrolling. Study time displays minutes and seconds with one-second updates, without counting background or paused-study time.
 
 ## Install and update
 
@@ -34,15 +36,17 @@ Create/manage keys at [Supadata](https://dash.supadata.ai/) and [DeepSeek](https
 - Library contains Vocabulary, Sentences and Notes. Search words/sentences, filter this video/all videos and review state, sort by collection time or English A–Z. Video order is available within one video. Sentence tags support grammar and expression categories independently; edit them when AI classification is inaccurate.
 - Grouping may show a sentence in multiple groups. Word export deduplicates IDs. Vocabulary and Sentences each allow 500 entries; capacity errors never silently evict your collection. Old longer Vocabulary entries are not automatically reclassified.
 
-## Study and review
+## Study and review (1.8.0)
 
-Start Study manually with a duration (default 20 minutes), word goal (5) and sentence goal (2). Goals can be zero. Each session belongs to one video and tab. Switching videos pauses it; resume on its original video or end it and start another session.
+Study tasks default to 20 effective minutes, five distinct practiced words and two distinct practiced sentences. Word/sentence goals can be zero. Scope is the current video; this project has no segment selector. Sticky controls show task state separately from the current accounting reason, cumulative/remaining time, progress and pause/resume/end actions.
 
-Reduce distractions is on by default: recommendation/comment/end-screen surfaces are hidden and automatic continuation is interrupted. Exiting restores the extension's page changes. This is voluntary assistance, not a parental lock or proof of attention.
+Collection is not practice. Only a submitted self-assessment (known, unsure, again) advances distinct-item goals. Opening a card or revealing its answer does not. Existing cards for this video can be reused, and repeated assessments update the pending-review state without duplicating progress. A single assessment never implies mastery.
 
-Foreground watching uses elapsed real time, not media progress. Playback speed and seeks do not multiply time; buffering, background tabs, unfocused windows, missing heartbeats and offline intervals do not count. Paused transcript/library activity counts only with a live panel and interaction in the last 60 seconds. Watching and activity do not overlap. At the target duration, video pauses and you may review, finish or add five minutes. Paused/finished sessions do not resume playback automatically.
+Effective time sums mutually exclusive active review, subtitle/word operation and foreground watching, in that priority order. Operation/review expire after 60 seconds without meaningful interaction. Ordinary pointer movement is excluded. Watching requires visible, focused, playing, nonbuffering playback. Playback rate does not multiply time; seeks, offline, background, manual pause and missing heartbeats do not add credit. Reaching the time goal prompts a choice without pausing playback or capping subsequent time. All three goals must be reached before the task claims success.
 
-Review reveals the English first, then the answer. Mark **记住了** or **还要复习**; these are self-assessments, not grades. New collection IDs from the current session come first; if none exist, the app explicitly offers the current video's existing collection. No collection means no fabricated exercise. Today's totals and seven local calendar days are shown; session history is retained locally for 90 days. Service-worker restarts conservatively discard the unconfirmed interval rather than adding offline time. Review time is separate from the learning duration.
+Panel reopening, refresh, changed video and worker restart preserve progress but require explicit resume, without offline credit. Resume may rebind to the foreground tab showing the same video and restore saved playback position without autoplay. Ended tasks can also be continued. Summary shows real timing distribution, practiced counts, pending review and each target result. Seven-day bars have daily details; empty history shows guidance.
+
+Records are local, versioned and retained for 90 days. Learning and Settings provide JSON export and confirmed record clearing; collections, notes and library self-assessments remain intact. Legacy records retain their timing and collection fields but gain no invented practice results.
 
 ## Print Word
 

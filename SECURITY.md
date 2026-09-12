@@ -22,3 +22,7 @@ The optional service binds only to 127.0.0.1:8766 and validates Host, a paired e
 ## Embedded learning layout
 
 Only sidepanel.html is web-accessible, restricted to the two supported video origins. Learning APIs require the extension origin; an embedded sidepanel.html is accepted with its sender tab, while site content scripts remain excluded. Embedded activity binds to the sender tab; playback relay rejects another active tab. Layout content scripts have no storage access; the worker accepts only the layout enum and a bounded 30–65 percent height. Closing removes only extension-owned styles, attributes and the iframe, retaining the original player node.
+
+## Study v2
+
+Session practice validates the current foreground video and bound tab. Content-script pulses cannot invoke record export or clearing. Accounting mutations share one serialized queue; duplicate sample timestamps add no credit. New document IDs and worker boots require manual continuation. Export omits internal runtime identifiers and credentials. Clear requests affect only ytd_study and UI requires confirmation. Legacy migration never infers practice from collection IDs.

@@ -17,7 +17,7 @@ function attachClient(rootSession,sessionId){
   });
   const send=(method,params={})=>new Promise((resolve,reject)=>{const id=++seq,timer=setTimeout(()=>{pending.delete(id);reject(new Error(`CDP timeout ${method}`));},15000);pending.set(id,{resolve,reject,timer});rootSession.send('Target.sendMessageToTarget',{sessionId,message:JSON.stringify({id,method,params})}).catch(reject);});
   const evaluate=async(fn,arg)=>{const r=await send('Runtime.evaluate',{expression:`(${fn.toString()})(${JSON.stringify(arg)??'undefined'})`,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw new Error(r.exceptionDetails.exception?.description||r.exceptionDetails.text);return r.result?.value;};
-  const click=async(selector,text)=>{const point=await evaluate(async({selector,text})=>{const e=[...document.querySelectorAll(selector)].find(e=>!text||e.textContent.trim()===text);if(!e)throw new Error(`Missing ${selector} ${text||''}`);const initial=e.getBoundingClientRect();if(initial.top<125||initial.bottom>innerHeight-100)e.scrollIntoView({block:'center',behavior:'instant'});await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));const r=e.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2};},{selector,text});await send('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',clickCount:1,...point});await send('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',clickCount:1,...point});};
+  const click=async(selector,text)=>{const point=await evaluate(async({selector,text})=>{const e=[...document.querySelectorAll(selector)].find(e=>!text||e.textContent.trim()===text);if(!e)throw new Error(`Missing ${selector} ${text||''}`);const initial=e.getBoundingClientRect();const hit=document.elementFromPoint(initial.left+initial.width/2,initial.top+initial.height/2);if(initial.top<125||initial.bottom>innerHeight-100||!e.contains(hit))e.scrollIntoView({block:'center',behavior:'instant'});await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));const r=e.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2};},{selector,text});await send('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',clickCount:1,...point});await send('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',clickCount:1,...point});};
   const screenshot=async name=>{await sleep(350);const r=await send('Page.captureScreenshot',{format:'png'});fs.writeFileSync(path.join(out,name),Buffer.from(r.data,'base64'));};
   return {send,evaluate,click,screenshot,errors};
 }
@@ -68,6 +68,50 @@ function attachClient(rootSession,sessionId){
     assert.equal(await panel.evaluate(()=>document.querySelector('[data-tab="ask"]')),null);
     assert.deepEqual(await panel.evaluate(()=>[...document.querySelectorAll('.tab')].map(e=>e.textContent.trim())),['字幕','概览','收藏库','学习']);
     if(bili){assert.equal(await worker.evaluate(()=>__nativeCalls.length),4);assert.ok(await worker.evaluate(()=>__nativeCalls.some(u=>u.includes('cid=20'))));}
+
+    if(process.env.YTD_TEST_STUDY==='1') {
+      await worker.evaluate(async fixtureId=>{await chrome.storage.local.set({ytd_vocabulary:[buildVocabularyEntry({term:'Consistency',videoId:fixtureId,videoTitle:'Practice',timestamp:0},{meaningZh:'持续性',explanationZh:'强调持续练习。',phonetic:'/kənˈsɪstənsi/'},Date.now(),'w1')],ytd_sentences:[{id:'s1',term:'The book which she recommended changed my perspective.',videoId:fixtureId,videoTitle:'Practice',translationZh:'她推荐的书改变了我的看法。',mainClause:'The book changed my perspective.',breakdown:'which 引导定语从句',createdAt:Date.now(),timestampSeconds:22,analysisStatus:'ready',grammarTags:['定语从句'],expressionTags:['普通表达']}]});},fixtureId);
+      await panel.evaluate(async()=>{await YTD_PANEL.refreshVocabulary();await YTD_LEARNING_UI.refreshLibrary();});
+      await panel.click('[data-tab="study"]');
+      await until(()=>panel.evaluate(()=>document.getElementById('studyPanel').textContent.includes('待开始')),'idle state');
+      assert.equal(await panel.evaluate(()=>document.querySelectorAll('.study-day').length),0,'empty history has no zero rows');
+      await panel.screenshot('study-01-empty.png');
+      await panel.evaluate(()=>{for(const [key,value] of [['minutes',1],['wordGoal',1],['sentenceGoal',1]])document.querySelector(`input[name=${key}]`).value=value;});
+      await panel.click('.learning-start-form button');
+      const get=()=>worker.evaluate(async()=>{const d=(await chrome.storage.local.get('ytd_study')).ytd_study;return d.sessions.find(s=>s.id===d.currentId);});
+      await until(async()=>(await get())?.status==='running','start task');
+      assert.equal(await video.locator('.recommend-list-v1').evaluate(e=>getComputedStyle(e).display),'none');await panel.click('#studyPanel input[type=checkbox]');await until(()=>video.locator('.recommend-list-v1').evaluate(e=>getComputedStyle(e).display!=='none'),'distraction off restores recommendations');await panel.click('#studyPanel input[type=checkbox]');
+      await video.evaluate(async()=>{const c=document.createElement('canvas');c.width=320;c.height=180;const d=c.getContext('2d');window.fixtureAnimation=setInterval(()=>{d.fillStyle='#dde7dc';d.fillRect(0,0,320,180);},100);const v=document.querySelector('video');v.srcObject=c.captureStream(10);await v.play();});
+      await until(async()=>(await get()).watchMs>=1000,'watching');
+      await panel.click('#studyPanel button','暂停学习');const paused=await get();await sleep(2100);assert.equal((await get()).watchMs,paused.watchMs,'manual pause blocks active playback credit');
+      await panel.click('#studyPanel button','继续学习');await until(async()=>(await get()).watchMs>paused.watchMs,'manual resume');
+      await panel.click('#studyPanel button','练习剩余单词');await until(()=>panel.evaluate(()=>document.querySelector('#studyReview').textContent.includes('回忆后查看答案')),'word card');
+      await panel.click('#studyReview button','回忆后查看答案');assert.equal((await get()).practicedWordIds.length,0,'reveal is not practice');await panel.click('#studyReview button','不熟');
+      await until(async()=>(await get()).practicedWordIds.length===1,'self assessment');assert.equal((await get()).practiceResults.w1.result,'unsure');
+      await panel.click('#studyPanel button','复习全部单词');await until(()=>panel.evaluate(()=>document.querySelector('#studyReview')?.textContent.includes('回忆后查看答案')),'repeat card ready');await panel.click('#studyReview button','回忆后查看答案');await panel.click('#studyReview button','记住了');await until(async()=>(await get()).practiceResults.w1.result==='known','repeat self assessment');assert.equal((await get()).practicedWordIds.length,1,'duplicate practice not double counted');
+      await panel.click('#studyPanel button','练习剩余句子');await until(()=>panel.evaluate(()=>document.querySelector('#studyReview')?.textContent.includes('回忆后查看答案')),'sentence card ready');await panel.click('#studyReview button','回忆后查看答案');await panel.click('#studyReview button','没记住');await until(async()=>(await get()).practicedSentenceIds.length===1,'sentence assessment');
+      // End early, resume the exact task, then simulate a real document refresh.
+      await panel.click('#studyPanel button','结束并总结');await until(()=>panel.evaluate(()=>document.getElementById('studyStatus').textContent.includes('部分目标未达标')),'honest early summary');await panel.screenshot('study-02-summary.png');
+      const before=await get();await panel.click('#studyPanel button','继续上次学习');await until(async()=>(await get()).status==='running','continue ended task');assert.equal((await get()).id,before.id);
+      await video.reload();await until(async()=>(await get()).status==='paused','refresh requires explicit resume');assert.equal((await get()).practicedWordIds.length,1);assert.ok((await get()).position>=before.position && (await get()).position<before.position+2,'refresh retains playhead including final live frame');
+      await video.locator('#ytd-digest-button').click();let reopened;await until(async()=>{reopened=(await cdp.send('Target.getTargets')).targetInfos.find(t=>t.url===`chrome-extension://${extensionId}/sidepanel.html`);return !!reopened;},'reopened study panel');
+      if(reopened.targetId!==target.targetId){const a=await cdp.send('Target.attachToTarget',{targetId:reopened.targetId,flatten:false});panel=attachClient(cdp,a.sessionId);await panel.send('Runtime.enable');await panel.send('Page.enable');}
+      await panel.send('Emulation.setDeviceMetricsOverride',{width:320,height:700,deviceScaleFactor:1,mobile:false});
+      await until(()=>panel.evaluate(()=>document.querySelectorAll('.transcript-text').length>=2),'reloaded captions');await panel.click('[data-tab="study"]');await until(()=>panel.evaluate(()=>document.getElementById('studyStatus').textContent.includes('已暂停')),'restored UI');
+      await panel.screenshot('study-03-narrow-restore.png');assert.ok(await panel.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'no horizontal overflow at 320px');
+      await panel.click('#studyPanel button','继续学习');await until(async()=>(await get()).status==='running','resumed after refresh');await worker.evaluate(async()=>{const {ytd_study:d}=await chrome.storage.local.get('ytd_study');d.sessions[0].targetMs=1;await chrome.storage.local.set({ytd_study:d});});
+      await until(()=>panel.evaluate(()=>document.getElementById('studyProgressBrief').textContent.includes('目标已完成')),'all goals reached');
+      await panel.click('#studyPanel button','结束并总结');await until(()=>panel.evaluate(()=>document.getElementById('studyStatus').textContent.includes('目标已完成')),'completed summary');
+      await panel.click('#studyPanel button','继续并复习不熟内容');await until(()=>panel.evaluate(()=>document.querySelector('#studyReview')?.textContent.includes('回忆后查看答案')),'pending card ready');await panel.click('#studyReview button','回忆后查看答案');await panel.click('#studyReview button','记住了');await until(async()=>(await get()).practiceResults.s1.result==='known','pending review cleared');
+      await panel.click('#studyPanel button','结束并总结');await panel.screenshot('study-04-complete.png');
+      const downloadDir=path.join(out,'downloads');fs.mkdirSync(downloadDir,{recursive:true});await cdp.send('Browser.setDownloadBehavior',{behavior:'allow',downloadPath:downloadDir});
+      await panel.click('#studyPanel button','导出学习记录');await until(()=>fs.readdirSync(downloadDir).some(f=>f.endsWith('.json')),'records export');
+      const record=JSON.parse(fs.readFileSync(path.join(downloadDir,fs.readdirSync(downloadDir).find(f=>f.endsWith('.json'))),'utf8'));assert.equal(record.schemaVersion,2);assert.equal(record.sessions[0].practicedWordIds.length,1);assert.equal(record.sessions[0].runtimeBoot,undefined);
+      // Accept only this explicit test confirmation; collection storage survives.
+      const clear=panel.click('#studyPanel button','清空学习记录');await sleep(300);await panel.send('Page.handleJavaScriptDialog',{accept:true});await clear;
+      await until(()=>panel.evaluate(()=>document.getElementById('studyPanel').textContent.includes('待开始')),'clear resets task');assert.equal(await worker.evaluate(async()=>(await chrome.storage.local.get('ytd_vocabulary')).ytd_vocabulary.length),1);
+      assert.deepEqual(panel.errors,[]);fs.writeFileSync(path.join(out,'result.json'),JSON.stringify({passed:true,checks:['empty','manual-pause-resume','self-assessment-only','distinct-practice','early-summary','resume-ended','refresh-restore','saved-position','320px','all-goals','pending-review','export-json','confirmed-clear-keeps-collections']},null,2));console.log('PASS: Study v2 task, practice, recovery, summary, narrow UI and records');return;
+    }
 
     if(process.env.YTD_TEST_LAYOUT==='1') {
       const player=await video.locator('#movie_player').elementHandle();
@@ -186,7 +230,7 @@ function attachClient(rootSession,sessionId){
       const v=document.querySelector('video');v.srcObject=canvas.captureStream(10);await v.play();
     });
     await until(()=>worker.evaluate(async()=>((await chrome.storage.local.get('ytd_study')).ytd_study.sessions[0].watchMs>=2000)),'real playback accounting');
-    const countdowns=new Set();for(let i=0;i<9;i++){countdowns.add(await panel.evaluate(()=>document.querySelector('#studyStats>p')?.textContent));await sleep(400);}
+    const countdowns=new Set();for(let i=0;i<9;i++){countdowns.add(await panel.evaluate(()=>document.querySelector('#studyClock')?.textContent));await sleep(400);}
     assert.ok(countdowns.size>=3,'countdown visibly advances every second');await panel.screenshot('07-countdown.png');
     const beforeBackground=await worker.evaluate(async()=>(await chrome.storage.local.get('ytd_study')).ytd_study.sessions[0].watchMs);
     const backgroundTab=await context.newPage();await backgroundTab.goto('about:blank');await sleep(3500);
@@ -198,12 +242,15 @@ function attachClient(rootSession,sessionId){
     let reopened;await until(async()=>{reopened=(await cdp.send('Target.getTargets')).targetInfos.find(t=>t.url===`chrome-extension://${extensionId}/sidepanel.html`);return !!reopened;},'reopened panel');
     if(reopened.targetId!==target.targetId){const a=await cdp.send('Target.attachToTarget',{targetId:reopened.targetId,flatten:false});panel=attachClient(cdp,a.sessionId);await panel.send('Runtime.enable');await panel.send('Page.enable');await panel.send('Emulation.setDeviceMetricsOverride',{width:420,height:900,deviceScaleFactor:1,mobile:false});}
     await until(()=>panel.evaluate(()=>document.querySelectorAll('.transcript-text').length>=2),'reopened transcript');
-    // Shorten only the fixture's remaining budget to check a real deadline pause.
-    await worker.evaluate(async()=>{const {ytd_study:d}=await chrome.storage.local.get('ytd_study');const session=d.sessions[0];session.targetMs=session.watchMs+session.activityMs+1500;await chrome.storage.local.set({ytd_study:d});});
-    await until(()=>worker.evaluate(async()=>(await chrome.storage.local.get('ytd_study')).ytd_study.sessions[0].status==='due'),'deadline state');
-    await until(()=>video.evaluate(()=>document.querySelector('video').paused),'video pauses at deadline');
-    await panel.click('[data-tab="study"]');await until(()=>panel.evaluate(()=>document.querySelector('#studyPanel')?.textContent.includes('加时 5 分钟')),'extension control');
-    await panel.click('#studyPanel button','加时 5 分钟');
+    await panel.click('[data-tab="study"]');await until(()=>panel.evaluate(()=>document.querySelector('#studyStatus')),'reopened task');
+    if(await panel.evaluate(()=>document.querySelector('#studyStatus').textContent.includes('已暂停')))await panel.click('#studyPanel button','继续学习');
+    await until(()=>worker.evaluate(async()=>(await chrome.storage.local.get('ytd_study')).ytd_study.sessions[0].status==='running'),'resume reopened task');
+    // A reached time goal prompts a decision without stopping playback or credit.
+    await worker.evaluate(async()=>{const {ytd_study:d}=await chrome.storage.local.get('ytd_study');const session=d.sessions[0];session.targetMs=session.watchMs+session.activityMs+session.reviewMs+1500;await chrome.storage.local.set({ytd_study:d});});
+    await until(()=>worker.evaluate(async()=>{const s=(await chrome.storage.local.get('ytd_study')).ytd_study.sessions[0];return s.watchMs+s.activityMs+s.reviewMs>=s.targetMs;}),'time target');
+    assert.equal(await video.evaluate(()=>document.querySelector('video').paused),false,'time target does not force pause');
+    await panel.click('[data-tab="study"]');await until(()=>panel.evaluate(()=>!document.querySelector('#studyDue')?.hidden),'time prompt');
+    await panel.click('#studyDue button','继续学习');
 
     // Use the actual bilingual control and translation pipeline with fixture AI.
     await panel.click('[data-tab="transcript"]');
@@ -256,11 +303,11 @@ function attachClient(rootSession,sessionId){
     const downloaded=fs.readdirSync(downloadDir).find(f=>f.endsWith('.docx'));assert.equal(fs.readFileSync(path.join(downloadDir,downloaded)).subarray(0,2).toString(),'PK');
     await panel.click('dialog button','关闭');
     // Self-assessment updates separate review storage without asking an AI model.
-    await panel.click('[data-tab="study"]');await panel.click('#studyPanel button','开始复习');
+    await panel.click('[data-tab="study"]');await panel.click('#studyPanel button','复习全部单词');
     await until(()=>panel.evaluate(()=>document.querySelector('#studyReview')?.textContent.includes('回忆后查看答案')),'review card');
-    const callsBefore=await worker.evaluate(()=>__fixtureCalls.length);await panel.click('#studyReview button','回忆后查看答案');await panel.screenshot('05-review.png');await panel.click('#studyReview button','还要复习');
+    const callsBefore=await worker.evaluate(()=>__fixtureCalls.length);await panel.click('#studyReview button','回忆后查看答案');await panel.screenshot('05-review.png');await panel.click('#studyReview button','没记住');
     await until(()=>worker.evaluate(async()=>Object.keys((await chrome.storage.local.get('ytd_reviews')).ytd_reviews||{}).length===1),'review saved');assert.equal(await worker.evaluate(()=>__fixtureCalls.length),callsBefore);
-    await panel.click('#studyPanel button','结束学习');await until(()=>video.evaluate(()=>!document.documentElement.hasAttribute('data-ytd-study-focus')),'distraction cleanup');
+    await panel.click('#studyPanel button','结束并总结');await until(()=>video.evaluate(()=>!document.documentElement.hasAttribute('data-ytd-study-focus')),'distraction cleanup');
     assert.deepEqual(panel.errors,[]);
     const settingsPage=await context.newPage();await settingsPage.goto(`chrome-extension://${extensionId}/options.html`);
     await settingsPage.locator('#supadataApiKey').fill('');await settingsPage.locator('#aiApiKey').fill('fixture-key');
@@ -268,8 +315,8 @@ function attachClient(rootSession,sessionId){
     await settingsPage.setViewportSize({width:1200,height:2100});await settingsPage.evaluate(()=>scrollTo(0,0));await sleep(500);
     await settingsPage.screenshot({path:path.join(out,'08-settings.png')});
 
-    console.log('PASS: extension load, 600ms hover, quick movement, stale results, cached save, bilingual cross-row sentence, tags, real playback/background accounting, deadline pause, extension, DOCX download, review and cleanup');
-    fs.writeFileSync(path.join(out,'result.json'),JSON.stringify({passed:true,platform:bili?'bilibili':'youtube',checks:['chinese-settings-no-supadata','chinese-ui','second-countdown','follow-playback','hover','quick-movement','stale-results','cache','bilingual-sentence-range','tags','real-playback','background-accounting','deadline-pause','extend','docx','review','cleanup'],errors:panel.errors},null,2));
+    console.log('PASS: extension load, 600ms hover, quick movement, stale results, cached save, bilingual cross-row sentence, tags, real playback/background accounting, time target prompt, continued timing, DOCX download, review and cleanup');
+    fs.writeFileSync(path.join(out,'result.json'),JSON.stringify({passed:true,platform:bili?'bilibili':'youtube',checks:['chinese-settings-no-supadata','chinese-ui','second-countdown','follow-playback','hover','quick-movement','stale-results','cache','bilingual-sentence-range','tags','real-playback','background-accounting','time-target-no-pause','continue','docx','review','cleanup'],errors:panel.errors},null,2));
   }catch(error){if(panel){console.error('PANEL',await panel.evaluate(()=>document.body.innerText).catch(()=>''));await panel.screenshot('failure.png').catch(()=>{});}throw error;}
   finally{if(asrServer)await new Promise(resolve=>asrServer.close(resolve));await context.close();fs.rmSync(profile,{recursive:true,force:true,maxRetries:5,retryDelay:200});}
 })().catch(error=>{console.error(error.stack);process.exitCode=1;});
