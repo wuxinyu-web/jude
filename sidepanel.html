@@ -18,7 +18,10 @@
           <div class="video-title" id="videoTitle"></div>
           <div class="video-channel" id="videoChannel"></div>
         </div>
-        <label class="layout-control">布局 <select id="learningLayout" aria-label="学习区布局"><option value="horizontal">左右布局</option><option value="vertical">上下布局</option><option value="immersive">沉浸模式</option></select></label><span id="layoutStatus" role="status" aria-live="polite"></span>
+        <div class="layout-actions" aria-label="调整学习区">
+          <button type="button" id="enterImmersive" class="layout-watch" title="放大视频，自动显示中英双语台词">▣ 专心看</button>
+          <button type="button" id="moveLearningPanel" title="调整完整学习区的位置">放到下方 ↓</button>
+        </div><span id="layoutStatus" role="status" aria-live="polite"></span>
         <button
           class="settings-btn"
           id="settingsBtn"

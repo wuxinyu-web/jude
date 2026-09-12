@@ -71,10 +71,13 @@ function attachClient(rootSession,sessionId){
 
     if(process.env.YTD_TEST_IMMERSIVE==='1'){
       const setTime=t=>worker.evaluate(async t=>{const [tab]=await chrome.tabs.query({active:true,lastFocusedWindow:true});await chrome.scripting.executeScript({target:{tabId:tab.id},args:[t],func:t=>Object.defineProperty(document.querySelector('video'),'currentTime',{configurable:true,get:()=>t})});},t);await setTime(2);
-      await panel.evaluate(()=>{const s=document.getElementById('learningLayout');s.value='immersive';s.dispatchEvent(new Event('change'));});
+      await panel.click('#enterImmersive');
       let frame;await until(async()=>{frame=video.frames().find(f=>f.url().includes('immersive=1'));return frame&&await frame.locator('.immersive-word').count()>0;},'immersive captions',20000);
       assert.equal(await frame.locator('.header').isVisible(),false);
       assert.ok((await frame.locator('#immersiveCue').innerText()).includes('Consistency'));
+      await until(async()=>(await frame.locator('.immersive-translation').innerText()).includes('中文测试译文'),'automatic bilingual translation');
+      assert.equal(await frame.getByRole('button',{name:'显示或收起中文对照',exact:true}).getAttribute('aria-pressed'),'true');
+      assert.equal(await frame.locator('.immersive-translation').isVisible(),true);
       assert.equal(await frame.locator('.transcript-entry').first().isVisible(),false);
       const geometry=await video.evaluate(()=>({p:document.querySelector('#movie_player').getBoundingClientRect().toJSON(),d:document.querySelector('#ytd-layout-dock').getBoundingClientRect().toJSON()}));
       assert.ok(geometry.p.height>600,'video keeps most of viewport');assert.ok(Math.abs(geometry.p.bottom-geometry.d.top)<2);
@@ -140,11 +143,11 @@ function attachClient(rootSession,sessionId){
     if(process.env.YTD_TEST_LAYOUT==='1') {
       const player=await video.locator('#movie_player').elementHandle();
       await video.evaluate(()=>{const observer=new MutationObserver(()=>{const f=document.querySelector('#ytd-layout-dock')?.shadowRoot?.querySelector('iframe');if(f){observer.disconnect();f.setAttribute('srcdoc','');}});observer.observe(document.body,{childList:true,subtree:true});});
-      await panel.evaluate(()=>{const el=document.getElementById('learningLayout');el.value='vertical';el.dispatchEvent(new Event('change',{bubbles:true}));});
+      await panel.click('#moveLearningPanel');
       await until(()=>video.locator('#ytd-layout-dock').count(),'vertical dock');
       let frame;
       await until(async()=>{frame=video.frames().find(f=>f.url().includes('sidepanel.html?embedded=1'));return frame && await frame.locator('.transcript-entry').count()>0;},'embedded transcript',20000);
-      assert.equal(await frame.locator('#learningLayout').inputValue(),'vertical');
+      assert.equal(await frame.locator('#moveLearningPanel').innerText(),'收至右侧 →');
       assert.equal(await player.evaluate(p=>p===document.querySelector('#movie_player')),true,'player DOM identity preserved');
       const geometry=await video.evaluate(()=>({player:document.getElementById('movie_player').getBoundingClientRect().toJSON(),dock:document.getElementById('ytd-layout-dock').getBoundingClientRect().toJSON()}));
       assert.ok(Math.abs(geometry.player.bottom-geometry.dock.top)<2,'video and study area stack without overlap');
@@ -160,7 +163,7 @@ function attachClient(rootSession,sessionId){
       await other.close();await video.bringToFront();
       await frame.locator('[data-tab="transcript"]').click();
       await video.screenshot({path:path.join(out,'10-vertical.png')});
-      await frame.locator('#learningLayout').selectOption('horizontal');
+      await frame.locator('#moveLearningPanel').click();
       await until(async()=>!await video.locator('#ytd-layout-dock').count(),'horizontal restores page');
       assert.equal(await video.locator('[data-ytd-layout-player]').count(),0);
       assert.equal(await video.locator('[data-ytd-layout-ancestor]').count(),0);

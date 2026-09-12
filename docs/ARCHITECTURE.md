@@ -61,3 +61,8 @@ layout-worker 管理布局偏好和原生侧栏开关；layout-content 用可撤
 ## 沉浸模式（1.9.0）
 
 `lib/immersive.js` consumes the existing sidepanel `ytdPlayback` event and raw timestamped segments. It adds no playback polling or study accumulator. `layout-content.js` retains the original player DOM and embeds the extension caption UI below it; document fullscreen includes both. Lookup and collection delegate to learning-ui / existing worker endpoints. Layout preferences retain independent vertical and immersive heights. Pure cue selection/token tests and isolated browser tests cover gestures, seeking, gaps, fullscreen and return to Library.
+
+
+### 1.9.1 contextual layout and bilingual queue
+
+The panel exposes direct immersive entry and context-dependent dock positioning; the Settings selector remains compatible with saved preferences. Immersive Chinese is enabled by default. Existing/native Chinese is preferred, otherwise `translateContent` translates the exact raw cue through the established worker. A bounded 150-entry in-page queue/cache serializes requests, retains only the latest pending cue, keys entries by video/generation/cue and keeps explicit failures until retry. Chinese-only sources are not translated into purported original English.

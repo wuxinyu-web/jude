@@ -1,8 +1,8 @@
-## 1.9.0: Immersive captions
+## 1.9.1: Direct controls and automatic bilingual immersion
 
-Choose 沉浸模式 in Layout for a large player and a compact, synchronized caption strip. Click a word for lookup, hold for 600 ms to save it, or click ☆ to save the sentence. Moving more than 8 px cancels a hold. Interactions keep the current cue visible; 跟上播放 resumes synchronization. Fullscreen includes both the player and captions; Escape exits. Resize the separator or return to 完整字幕 / 收藏库 at any time.
+Click 专心看 to enlarge the player and show synchronized English / Chinese captions. 展开字幕 returns to the full workspace; contextual 放到下方 / 收至右侧 buttons move it without a three-mode picker. Settings retain the default layout preference. Resize and fullscreen still include the captions.
 
-This reuses the existing transcript, lookup, collection and study services. The Chinese toggle only shows prepared translations; no new provider request occurs merely by entering this mode. Timing accuracy follows the source timestamps.
+Chinese appears by default, preferring native captions or prepared translations. Missing Chinese is translated through the configured DeepSeek service, one current-cue request at a time; only the latest queued cue is retained after seeking. Failures offer retry. The 双语 / 英文 button temporarily hides or reveals Chinese. Chinese-only sources still require explicit original-audio transcription and are never back-translated as original dialogue.
 
 1.8.0 adds practice-based study goals, mutually exclusive timing, explicit continuation, summaries and local record management.
 

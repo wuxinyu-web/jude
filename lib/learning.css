@@ -74,3 +74,8 @@ html.immersive body>.header,html.immersive #contentArea,html.immersive #followPl
 html.immersive .learning-float{max-height:calc(100vh - 16px);background:#202622;color:#f2f2ea;border-color:#55654e}.immersive-stage .learning-muted{color:#bec6b8}
 @media(max-width:420px){.immersive-stage{padding-inline:8px}.immersive-toolbar{gap:2px;font-size:10px}.immersive-cue{font-size:19px}}
 @media(prefers-reduced-motion:reduce){.immersive-cue{transition:none}}
+
+/* Direct, contextual workspace actions instead of a three-mode picker. */
+.layout-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.layout-actions button{font:inherit;font-size:12px;border:1px solid #e6ddd0;border-radius:18px;background:transparent;color:#746b5f;padding:7px 11px;cursor:pointer;white-space:nowrap}.layout-actions .layout-watch{background:#c5684d;border-color:#c5684d;color:#fff}.layout-actions button:hover{filter:brightness(.96)}.layout-actions button:focus-visible{outline:2px solid #53714e;outline-offset:3px}.layout-actions button:disabled{opacity:.6;cursor:wait}
+html.immersive .immersive-translation{font-size:clamp(14px,1.35vw,19px);color:#cad0c6;margin:3px 0 8px}
+@media(max-width:420px){.layout-actions{gap:4px}.layout-actions button{font-size:11px;padding:6px 9px}.header-top .video-info{flex-basis:100%}}

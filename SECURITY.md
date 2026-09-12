@@ -31,3 +31,5 @@ Session practice validates the current foreground video and bound tab. Content-s
 ## 沉浸模式（1.9.0）
 
 沉浸模式使用本地扩展文档；所有字幕、状态和服务返回文本使用 textContent / 文本节点呈现。收藏仍经过现有扩展页面消息校验和容量限制。全屏由用户手势触发，退出学习区撤销本扩展的样式和事件监听。
+
+1.9.1 自动双语沿用 translateContent 的扩展页面身份检查与纯文本输出。翻译按视频、加载代次与原始台词隔离；旧请求结果不会作为新台词显示。
