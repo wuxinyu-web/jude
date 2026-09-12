@@ -18,6 +18,7 @@
           <div class="video-title" id="videoTitle"></div>
           <div class="video-channel" id="videoChannel"></div>
         </div>
+        <label class="layout-control">布局 <select id="learningLayout" aria-label="学习区布局"><option value="horizontal">左右布局</option><option value="vertical">上下布局</option></select></label><span id="layoutStatus" role="status" aria-live="polite"></span>
         <button
           class="settings-btn"
           id="settingsBtn"
@@ -311,5 +312,6 @@
     <script src="sidepanel.js"></script>
     <script src="lib/learning-ui.js"></script>
     <script src="lib/local-asr.js"></script>
+      <script src="lib/layout-ui.js"></script>
   </body>
 </html>

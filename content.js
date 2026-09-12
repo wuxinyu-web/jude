@@ -122,6 +122,8 @@ if (document.readyState === "loading") {
  * When they send key moments, we highlight them on the progress bar.
  */
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  // The dedicated layout listener owns these asynchronous replies.
+  if (["openVerticalLayout", "closeVerticalLayout"].includes(message.action)) return false;
   debugLog("[YouTube Digest Content] Received message:", message.action, message);
 
   if (message.action === "getVideoInfo") {

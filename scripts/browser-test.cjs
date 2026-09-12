@@ -69,6 +69,40 @@ function attachClient(rootSession,sessionId){
     assert.deepEqual(await panel.evaluate(()=>[...document.querySelectorAll('.tab')].map(e=>e.textContent.trim())),['字幕','概览','收藏库','学习']);
     if(bili){assert.equal(await worker.evaluate(()=>__nativeCalls.length),4);assert.ok(await worker.evaluate(()=>__nativeCalls.some(u=>u.includes('cid=20'))));}
 
+    if(process.env.YTD_TEST_LAYOUT==='1') {
+      const player=await video.locator('#movie_player').elementHandle();
+      await video.evaluate(()=>{const observer=new MutationObserver(()=>{const f=document.querySelector('#ytd-layout-dock')?.shadowRoot?.querySelector('iframe');if(f){observer.disconnect();f.setAttribute('srcdoc','');}});observer.observe(document.body,{childList:true,subtree:true});});
+      await panel.evaluate(()=>{const el=document.getElementById('learningLayout');el.value='vertical';el.dispatchEvent(new Event('change',{bubbles:true}));});
+      await until(()=>video.locator('#ytd-layout-dock').count(),'vertical dock');
+      let frame;
+      await until(async()=>{frame=video.frames().find(f=>f.url().includes('sidepanel.html?embedded=1'));return frame && await frame.locator('.transcript-entry').count()>0;},'embedded transcript',20000);
+      assert.equal(await frame.locator('#learningLayout').inputValue(),'vertical');
+      assert.equal(await player.evaluate(p=>p===document.querySelector('#movie_player')),true,'player DOM identity preserved');
+      const geometry=await video.evaluate(()=>({player:document.getElementById('movie_player').getBoundingClientRect().toJSON(),dock:document.getElementById('ytd-layout-dock').getBoundingClientRect().toJSON()}));
+      assert.ok(Math.abs(geometry.player.bottom-geometry.dock.top)<2,'video and study area stack without overlap');
+      await video.mouse.click(600,geometry.dock.top+15);await video.keyboard.press('ArrowUp');
+      await until(()=>worker.evaluate(async()=> (await chrome.storage.local.get('ytd_layout_preferences')).ytd_layout_preferences.height===50),'keyboard resize persists');
+      await video.mouse.move(600,450+15);await video.mouse.down();await video.mouse.move(600,405,{steps:8});await video.mouse.up();
+      await until(()=>worker.evaluate(async()=> Math.abs((await chrome.storage.local.get('ytd_layout_preferences')).ytd_layout_preferences.height-55)<0.1),'drag resize persists');
+      await frame.locator('#returnToPlaybackBtn').click();
+      await frame.locator('[data-tab="library"]').click();
+      assert.equal(await frame.evaluate(async()=> (await chrome.runtime.sendMessage({action:'getLearningLibrary'})).success),true,'embedded collection APIs authorized');
+      const other=await context.newPage();await other.goto('https://example.org');
+      const bound=await frame.evaluate(()=>YTD_PANEL.context().videoId);assert.equal(bound,fixtureId,'embedded frame keeps its owner video');
+      await other.close();await video.bringToFront();
+      await frame.locator('[data-tab="transcript"]').click();
+      await video.screenshot({path:path.join(out,'10-vertical.png')});
+      await frame.locator('#learningLayout').selectOption('horizontal');
+      await until(async()=>!await video.locator('#ytd-layout-dock').count(),'horizontal restores page');
+      assert.equal(await video.locator('[data-ytd-layout-player]').count(),0);
+      assert.equal(await video.locator('[data-ytd-layout-ancestor]').count(),0);
+      assert.equal(await video.locator('html').getAttribute('data-ytd-layout'),null);
+      assert.equal(await player.evaluate(p=>p===document.querySelector('#movie_player')),true);
+      assert.equal(await worker.evaluate(async()=> (await chrome.storage.local.get('ytd_layout_preferences')).ytd_layout_preferences.mode),'horizontal');
+      fs.writeFileSync(path.join(out,'result.json'),JSON.stringify({passed:true,checks:['vertical-iframe','empty-srcdoc-recovery','keyboard-resize','drag-resize','player-preserved','stacked-geometry','embedded-collections','tab-binding','horizontal-restore','preference-persistence']},null,2));
+      panel=null;console.log('PASS: adjustable vertical/horizontal layout');return;
+    }
+
     if(asr){
       let complete=false,starts=0,cancelled=false;
       const result={videoId:fixtureId,language:'en',source:'local-asr',transcript:[{text:'An object at rest stays at rest. An object in motion stays in motion.',start:0,duration:12},{text:'The book which she recommended changed my perspective.',start:22,duration:12}]};

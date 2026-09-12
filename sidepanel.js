@@ -14,6 +14,10 @@ const debugLog = (...args) => {
 // STATE
 // ============================================================
 
+const embeddedPanel = /(?:^|[?&])embedded=1(?:&|$)/.test(globalThis.location?.search || "");
+let embeddedHostTabId = null;
+if (embeddedPanel) chrome.tabs.getCurrent().then(tab=>{embeddedHostTabId=tab?.id;});
+
 let currentVideoId = null;
 let currentVideoUrl = null;
 let currentAnalysis = null;
@@ -646,6 +650,7 @@ function handleFrontTabUrl(url) {
 
 // Fires when a tab's URL changes — including YouTube's no-reload navigation.
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (embeddedPanel && tabId !== embeddedHostTabId) return;
   if (!changeInfo.url || !tab.active) return;
   if (panelWindowId !== null && tab.windowId !== panelWindowId) return;
   handleFrontTabUrl(changeInfo.url);
@@ -654,6 +659,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 // Fires when a different tab comes to the front — switching tabs, or a new
 // tab being opened (including ones opened by clicking links in other apps).
 chrome.tabs.onActivated.addListener(async ({ tabId, windowId }) => {
+  if (embeddedPanel && tabId !== embeddedHostTabId) return;
   if (panelWindowId !== null && windowId !== panelWindowId) return;
   try {
     const tab = await chrome.tabs.get(tabId);
@@ -818,6 +824,12 @@ async function checkCurrentTab() {
       active: true,
       lastFocusedWindow: true,
     });
+
+    if (embeddedPanel) {
+      const owner = await chrome.tabs.getCurrent();
+      embeddedHostTabId = owner?.id;
+      if (!owner || owner.id !== tab?.id) return;
+    }
 
     debugLog("[YouTube Digest Panel] Found tab:", tab?.id, tab?.url);
 
@@ -3555,6 +3567,7 @@ function stopPlaybackTracking() {
  * YouTube tab and highlights + scrolls to the matching transcript entry.
  */
 async function playbackTrackingTick({ returnToPosition = false } = {}) {
+  if (embeddedPanel && document.hidden) return false;
   const snapshotVideoId=currentVideoId, snapshotGeneration=digestGeneration;
   let timeout;
   try {

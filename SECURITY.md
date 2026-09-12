@@ -18,3 +18,7 @@ Canonical BV and part identities are validated centrally. Native caption request
 ## Local ASR companion
 
 The optional service binds only to 127.0.0.1:8766 and validates Host, a paired extension ID, and Origin when present. Browser preflights from websites are denied. It accepts canonical BV identities only (no arbitrary URL, path, shell text, cookies, or credentials), uses argv subprocess execution, bounds duration/downloads, and runs one audio job at a time. Transcripts are checked for identity, source, language, size, ordering, and finite timestamps before replacing the active source. A digest generation change invalidates work from the previous transcript. Model weights are checksum pinned and no remote model Python code is executed.
+
+## Embedded learning layout
+
+Only sidepanel.html is web-accessible, restricted to the two supported video origins. Learning APIs require the extension origin; an embedded sidepanel.html is accepted with its sender tab, while site content scripts remain excluded. Embedded activity binds to the sender tab; playback relay rejects another active tab. Layout content scripts have no storage access; the worker accepts only the layout enum and a bounded 30–65 percent height. Closing removes only extension-owned styles, attributes and the iframe, retaining the original player node.

@@ -15,6 +15,8 @@
 // chrome.storage.local and are never part of the extension source.
 importScripts("lib/platform.js", "settings.js", "lib/wbi.js", "lib/bili-api.js", "lib/bilibili-transcript.js");
 
+importScripts("lib/layout-worker.js");
+
 const DEBUG = false;
 const AI_PROVIDER_IDLE_TIMEOUT_MS = 50_000;
 const AI_PROVIDER_HARD_TIMEOUT_MS = 120_000;
@@ -240,6 +242,7 @@ async function readBoundedAiResponse(response, onActivity) {
  * Chrome's Side Panel API lets us show a persistent panel alongside the page.
  */
 chrome.action.onClicked.addListener((tab) => {
+  if (globalThis.YTD_LAYOUT?.isVertical()) { YTD_LAYOUT.vertical(tab.id).catch(()=>{}); return; }
   // Re-enable + open without awaiting — preserves user gesture context
   chrome.sidePanel.setOptions({
     tabId: tab.id,
@@ -252,7 +255,7 @@ chrome.action.onClicked.addListener((tab) => {
 /**
  * Allow the side panel to open on any page, but it's designed for YouTube.
  */
-chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false });
 
 chrome.runtime.onInstalled.addListener(({ reason }) => {
   if (reason === "install") chrome.runtime.openOptionsPage();
@@ -312,7 +315,7 @@ async function updatePanelForTab(tabId, url, windowId) {
   const isCurrent = () => panelReconciliations.get(tabId) === snapshot;
 
   try {
-    if (!isYouTubeTabUrl(url)) {
+    if (!isYouTubeTabUrl(url) || globalThis.YTD_LAYOUT?.isVertical()) {
       await closePanelForTab(tabId, windowId, isCurrent);
       if (!isCurrent()) return;
       await chrome.sidePanel
@@ -518,6 +521,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.action === "openSidePanel") {
+    if (globalThis.YTD_LAYOUT?.isVertical() && sender.tab?.id) {
+      YTD_LAYOUT.vertical(sender.tab.id).then(sendResponse,e=>sendResponse({success:false,error:e.message}));return true;
+    }
     const tabId = sender.tab?.id;
     debugLog("[YouTube Digest BG] openSidePanel requested from tab:", tabId);
 
@@ -584,6 +590,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           tabs[0]?.url,
         );
 
+        if (sender.tab && sender.url?.split("?")[0] === chrome.runtime.getURL("sidepanel.html") && sender.tab.id !== tabs[0]?.id) {sendResponse({success:false});return;}
         if (tabs[0] && isYouTubeTabUrl(tabs[0].url)) {
           debugLog(
             "[YouTube Digest BG] Sending to tab:",

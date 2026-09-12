@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "视频英语学习开发版",
-  "version": "1.6.1",
+  "version": "1.7.0",
   "minimum_chrome_version": "116",
   "description": "支持哔哩哔哩与 YouTube：双语字幕、词句收藏、专注计时、复习和 Word 讲义。",
   "permissions": [
@@ -45,7 +45,8 @@
       "js": [
         "lib/platform.js",
         "content.js",
-        "lib/study-content.js"
+        "lib/study-content.js",
+        "lib/layout-content.js"
       ],
       "run_at": "document_idle"
     },
@@ -56,7 +57,8 @@
       "js": [
         "lib/platform.js",
         "lib/bilibili-content.js",
-        "lib/study-content.js"
+        "lib/study-content.js",
+        "lib/layout-content.js"
       ],
       "run_at": "document_idle"
     }
@@ -65,5 +67,16 @@
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
-  }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "sidepanel.html"
+      ],
+      "matches": [
+        "https://www.bilibili.com/*",
+        "https://www.youtube.com/*"
+      ]
+    }
+  ]
 }
