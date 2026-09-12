@@ -1,3 +1,7 @@
+## 1.6.0: Local original-audio ASR
+
+Bilibili now offers explicit local Whisper transcription of English audio. Chinese source captions are never back-translated and presented as original dialogue. A paired Apple Silicon companion service is required; see [local-asr/README.md](local-asr/README.md). English ASR retains original Chinese captions for time-aligned comparison and can be reverted. Audio stays on the Mac; recognition can still make mistakes.
+
 # Video English Study — Bilibili and YouTube (1.5.0)
 
 The entire interface and settings are Simplified Chinese. Bilibili native captions require no Supadata key; English tracks are preferred, and missing captions or login requirements are explicit. Part numbers remain distinct in caches, collections, sessions and DOCX links. YouTube support and existing stored data remain compatible.

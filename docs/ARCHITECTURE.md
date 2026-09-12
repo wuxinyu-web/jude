@@ -41,3 +41,10 @@ Node tests cover existing behavior, sentence/cache/storage races, mode transitio
 `lib/platform.js` owns video parsing and canonical source URLs. Existing YouTube IDs remain unchanged; a Bilibili key uses BV plus `_pN` for a non-first part. `bilibili-content.js` reads the native player, mounts controls outside its framework-owned video container, and speaks the same relay protocol. `bilibili-transcript.js` adapts WBI-signed native subtitle metadata and bounded CDN captions to the existing transcript pipeline. API/WBI primitives are reused under the included MIT license.
 
 Content playback heartbeats run each second; side-panel rendering polls every 500 ms so saved second changes are visible without inventing time. The toolbar follow toggle and periodic relay retain video/generation checks and explicitly recenter even if the active row did not change. UI strings are translated in source, leaving original subtitles, tags and user data untouched.
+
+
+## 1.6 Local original-audio ASR
+
+`lib/local-asr.js` owns the side-panel job controls and strict result validation. Its loopback HTTP requests communicate with the separately started `local-asr/server.py`. Only video identities cross that boundary. The local worker downloads public Bilibili audio and runs MLX Whisper with `task=transcribe, language=en`; it never receives source Chinese captions as model input. Processing progress is persistent, cancellation terminates the process group, and incomplete jobs are marked failed after restart. The panel stores job IDs to resume observation without requiring the side panel to stay open.
+
+Applying ASR validates the current video, increments digest/translation/analysis generations, clears translations derived from the old source, and stores a native subtitle backup in the same digest cache. Chinese source captions are aligned by overlapping time windows for bilingual viewing; they are never sent through a Chinese-to-Chinese translation pass. Restoring the native source invalidates the ASR-derived UI context in the same way. Closed/changed panels do not apply a stale job to another video.

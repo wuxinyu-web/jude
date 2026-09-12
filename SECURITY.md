@@ -13,3 +13,8 @@ Word uses a bundled library and explicit field allowlist. No remote executable s
 ## Bilibili adapter (1.5.0)
 
 Canonical BV and part identities are validated centrally. Native caption requests are bounded to 30 seconds and 8 MiB, require HTTPS, and allow only api.bilibili.com or hdslb.com subdomains. Redirects are rejected. Bilibili login cookies stay with the site API; captions CDN and AI services never receive them. Login/risk-control failures are displayed; no access controls are bypassed.
+
+
+## Local ASR companion
+
+The optional service binds only to 127.0.0.1:8766 and validates Host, a paired extension ID, and Origin when present. Browser preflights from websites are denied. It accepts canonical BV identities only (no arbitrary URL, path, shell text, cookies, or credentials), uses argv subprocess execution, bounds duration/downloads, and runs one audio job at a time. Transcripts are checked for identity, source, language, size, ordering, and finite timestamps before replacing the active source. A digest generation change invalidates work from the previous transcript. Model weights are checksum pinned and no remote model Python code is executed.

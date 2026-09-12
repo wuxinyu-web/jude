@@ -22,6 +22,7 @@ let currentTranscriptText = null; // Plain text (for display/export)
 let currentTranscriptTimestamped = null; // With timestamps for AI analysis
 let currentTranscriptLanguage = null;
 let currentTranscriptSource = "native";
+let currentNativeTranscriptBackup = null;
 let currentVideoTitle = "";
 let currentChannelName = "";
 let currentVideoDescription = "";
@@ -943,6 +944,7 @@ async function startDigest(videoId, videoUrl) {
 
   currentVideoId = videoId;
   globalThis.YTD_LEARNING_UI?.videoChanged();
+  globalThis.YTD_ASR_UI?.videoChanged();
   currentVideoUrl = videoUrl;
   currentAnalysis = null;
   currentTranscript = null;
@@ -950,6 +952,7 @@ async function startDigest(videoId, videoUrl) {
   currentTranscriptTimestamped = null;
   currentTranscriptLanguage = null;
   currentTranscriptSource = "native";
+  currentNativeTranscriptBackup = null;
 
   await loadPendingTranscriptViewState(requestSnapshot);
   if (!isCurrentDigestRequest(requestSnapshot)) return;
@@ -972,6 +975,7 @@ async function startDigest(videoId, videoUrl) {
     currentTranscriptTimestamped = cached.transcriptTimestamped;
     currentTranscriptLanguage = cached.transcriptLanguage || null;
     currentTranscriptSource = cached.transcriptSource || "native";
+    currentNativeTranscriptBackup = cached.nativeTranscriptBackup || null;
 
     // Restore semantic-segment translations from persistent storage.
     if (cached.paragraphCache) {
@@ -1384,6 +1388,7 @@ function addTranscriptRowActions(row, segment) {
 }
 
 function renderTranscriptSourceBadge(languageLabel) {
+  if(currentTranscriptSource === "local-asr") return `<span class="source-dot source-dot--ai"></span> 英文原声自动转写（本地 Whisper，可能有识别误差） · ${escapeHtml(languageLabel)}`;
   const generated = currentTranscriptSource === "generated";
   const sourceLabel = generated
     ? "由视频音频自动生成"
@@ -1393,6 +1398,7 @@ function renderTranscriptSourceBadge(languageLabel) {
 }
 
 function renderTranscript() {
+  globalThis.YTD_ASR_UI?.refresh();
   if (!currentTranscript) return;
 
   const transcriptList = document.getElementById("transcriptList");
@@ -3249,6 +3255,7 @@ async function saveToCache(videoId, requestSnapshot = null) {
       transcriptTimestamped: currentTranscriptTimestamped,
       transcriptLanguage: currentTranscriptLanguage,
       transcriptSource: currentTranscriptSource,
+      nativeTranscriptBackup: currentNativeTranscriptBackup,
       videoTitle: currentVideoTitle,
       channelName: currentChannelName,
       paragraphCache: paragraphCacheForVideo,
@@ -3843,6 +3850,10 @@ function setTranscriptModeButtons(mode) {
 
 async function handleTranscriptModeChange(mode) {
   if (!["original", "zh", "bilingual"].includes(mode)) return;
+  if(mode !== "original" && /^(ai-)?zh(?:-|$)/i.test(currentTranscriptLanguage||"")) {
+    currentTranscriptMode="original";setTranscriptModeButtons("original");renderTranscript();
+    globalThis.YTD_ASR_UI?.notice("当前只有中文字幕。请先点击「转写英文原声」，完成后才能显示英文与中文对照。");return;
+  }
   if (mode === currentTranscriptMode) return;
 
   currentTranscriptMode = mode;
@@ -3892,8 +3903,8 @@ function renderTranscriptModeRows(segments, mode) {
   const originalLabel = getOriginalTranscriptLabel();
   const modeLabel =
     mode === "bilingual"
-      ? `${originalLabel} + 简体中文`
-      : `简体中文 · translated from ${originalLabel}`;
+      ? `${originalLabel} + ${currentTranscriptSource==="local-asr"&&currentNativeTranscriptBackup?"原站中文字幕（按时间对齐）":"简体中文"}`
+      : `简体中文 · 对照${originalLabel}`;
   badge.innerHTML = renderTranscriptSourceBadge(modeLabel);
   transcriptList.parentElement.insertBefore(badge, transcriptList);
 
@@ -4081,6 +4092,13 @@ function retryTranslationSegment(index, generation) {
  * remaining rows. Batches are sequential so the provider is never flooded.
  */
 async function translateTranscript() {
+  if(/^(ai-)?zh(?:-|$)/i.test(currentTranscriptLanguage||"")) {currentTranscriptMode="original";setTranscriptModeButtons("original");renderTranscript();return;}
+  if(currentTranscriptSource==="local-asr" && /^(ai-)?zh(?:-|$)/i.test(currentNativeTranscriptBackup?.language||"")){
+    translationGeneration++;transcriptScrollObserver?.disconnect();transcriptScrollObserver=null;
+    const groups=getActiveTranscriptSegments();
+    for(const [index,group] of groups.entries()){const end=groups[index+1]?.start ?? Math.max(...currentTranscript.map(item=>item.start+item.duration));transcriptParagraphCache.set(transcriptTranslationCacheKey(group),YTD_ASR_CORE.alignChinese({...group,duration:end-group.start},currentNativeTranscriptBackup.transcript)||"此时间段暂无原站中文字幕。");}
+    renderTranscriptModeRows(groups,currentTranscriptMode);return;
+  }
   const segments = getActiveTranscriptSegments();
   if (!segments.length || currentTranscriptMode === "original") return;
 
@@ -4246,7 +4264,8 @@ globalThis.__YTD_RACE_TESTING__ = {
 globalThis.YTD_PANEL = {
   context: () => ({ videoId: currentVideoId, videoTitle: currentVideoTitle,
     channelName: currentChannelName, tabId: youtubeTabId, generation: digestGeneration,
-    segments: getActiveTranscriptSegments(), libraryView: currentLibraryView }),
+    segments: getActiveTranscriptSegments(), libraryView: currentLibraryView, source:currentTranscriptSource, language:currentTranscriptLanguage, hasNativeBackup:Boolean(currentNativeTranscriptBackup) }),
+  applyASR: applyOriginalAudioTranscript, restoreNativeTranscript,
   vocabulary: () => vocabularyEntries,
   refreshVocabulary: refreshVocabularyEntries,
   switchLibraryView, switchTab,
@@ -4254,3 +4273,33 @@ globalThis.YTD_PANEL = {
   speak: (text) => speakVocabularyTerm(text, "en", window.speechSynthesis, window.SpeechSynthesisUtterance),
   seek: (entry) => openVocabularyTimestamp(entry, getSafeHttpUrl(entry.timestampedUrl)),
 };
+
+
+async function applyOriginalAudioTranscript(input) {
+  const result=YTD_ASR_CORE.validateResult(input,currentVideoId);
+  const snapshot={generation:digestGeneration,videoId:currentVideoId};
+  if(!isCurrentDigestRequest(snapshot))return;
+  if(currentTranscriptSource!=="local-asr" && currentTranscript?.length)currentNativeTranscriptBackup={transcript:currentTranscript,language:currentTranscriptLanguage,source:currentTranscriptSource};
+  await replaceTranscriptSource(result,snapshot);
+}
+async function restoreNativeTranscript(){
+  if(!currentNativeTranscriptBackup)return;
+  const backup=currentNativeTranscriptBackup;currentNativeTranscriptBackup=null;
+  await replaceTranscriptSource(backup,{generation:digestGeneration,videoId:currentVideoId});
+}
+async function replaceTranscriptSource(result,snapshot){
+  if(!isCurrentDigestRequest(snapshot))return;
+  snapshot={...snapshot,generation:++digestGeneration};
+  globalThis.YTD_LEARNING_UI?.videoChanged();
+  // Invalidate work based on the previous language, including explanation context.
+  translationGeneration++;overviewTranslationGeneration++;analysisGeneration++;
+  closeActiveExplanationModal?.();transcriptScrollObserver?.disconnect();transcriptScrollObserver=null;
+  currentAnalysis=null;isAnalysisLoading=false;currentTranscriptMode="original";setTranscriptModeButtons("original");
+  transcriptParagraphCache=new Map([...transcriptParagraphCache].filter(([key])=>!key.startsWith(`${currentVideoId}:`)));
+  currentTranscript=result.transcript;currentTranscriptLanguage=result.language;currentTranscriptSource=result.source;
+  currentTranscriptText=currentTranscript.map(item=>item.text).join(" ");
+  currentTranscriptTimestamped=currentTranscript.map(item=>`[${Math.floor(item.start/60)}:${String(Math.floor(item.start%60)).padStart(2,"0")}] ${item.text}`).join("\n");
+  resetTranscriptSearchForVideo(currentVideoId);stopPlaybackTracking();renderTranscript();showState("results");
+  document.getElementById("tabsNav").style.display="flex";switchTab("transcript");
+  setupExplainFeature();await saveToCache(currentVideoId,snapshot);globalThis.YTD_ASR_UI?.refresh();
+}

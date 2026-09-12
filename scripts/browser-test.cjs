@@ -2,6 +2,7 @@
 const {chromium}=require('playwright');
 const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),assert=require('node:assert/strict');
 const root=path.resolve(process.env.YTD_EXTENSION_DIR||path.join(__dirname,'..')),out=path.resolve(process.env.YTD_TEST_OUTPUT||path.join(root,'test-results'));
+const asr=process.env.YTD_TEST_ASR==='1';
 const bili=process.env.YTD_TEST_PLATFORM==='bilibili',fixtureId=bili?'BV1xx411c7mD_p2':'abcDEF12345';
 fs.mkdirSync(out,{recursive:true});
 const profile=fs.mkdtempSync(path.join(os.tmpdir(),'ytd-study-browser-'));
@@ -22,12 +23,13 @@ function attachClient(rootSession,sessionId){
 }
 (async()=>{
   const context=await chromium.launchPersistentContext(profile,{channel:'chromium',headless:true,viewport:{width:1200,height:900},acceptDownloads:true,args:[`--disable-extensions-except=${root}`,`--load-extension=${root}`]});
-  let panel;
+  let panel, asrServer;
   try{
     const worker=context.serviceWorkers()[0]||await context.waitForEvent('serviceworker');
     const extensionId=new URL(worker.url()).host;
-    await worker.evaluate(async({bili,fixtureId})=>{
+    await worker.evaluate(async({bili,fixtureId,asr})=>{
       const transcript=[{text:'Consistency is important when you learn something new. A little practice every day builds a useful habit.',start:0,duration:12},{text:'The book which she recommended changed my perspective, although I was initially reluctant to read it.',start:22,duration:12}];
+      if(asr)for(const [i,item] of transcript.entries())item.text=i?'她推荐的书改变了我的看法。':'静止的物体将保持静止，运动的物体将保持运动。';
       for(let i=0;i<14;i++)transcript.push({text:`This is another complete practice sentence about learning English every day, number ${i+1}.`,start:45+i*20,duration:12});
       await chrome.storage.local.clear();
       await chrome.storage.local.set({ytd_settings:{aiApiKey:'fixture-key',supadataApiKey:'fixture-key'},digest_abcDEF12345:{timestamp:Date.now(),videoTitle:'English practice fixture',channelName:'Test fixture',transcriptLanguage:'en',transcriptSource:'native',transcript,transcriptText:transcript.map(t=>t.text).join(' '),transcriptTimestamped:transcript.map(t=>`[${t.start}] ${t.text}`).join('\n')}});
@@ -38,7 +40,7 @@ function attachClient(rootSession,sessionId){
           __nativeCalls.push(String(url));let payload;
           if(String(url).includes('/view?'))payload={code:0,data:{bvid:'BV1xx411c7mD',aid:1,title:'B 站英语课堂',owner:{name:'测试老师'},pages:[{page:1,cid:10},{page:2,cid:20,part:'英语学习 · 第二节'}]}};
           else if(String(url).includes('/nav'))payload={data:{wbi_img:{img_url:'https://i0.hdslb.com/bfs/wbi/7cd084941338484aae1ad9425b84077c.png',sub_url:'https://i0.hdslb.com/bfs/wbi/4932caff0ff746eab6f01bf08b70ac45.png'}}};
-          else if(String(url).includes('/player/'))payload={code:0,data:{subtitle:{subtitles:[{lan:'en',lan_doc:'英语',subtitle_url:'https://aisubtitle.hdslb.com/fixture.json'}]}}};
+          else if(String(url).includes('/player/'))payload={code:0,data:{subtitle:{subtitles:[{lan:asr?'ai-zh':'en',lan_doc:asr?'中文':'英语',subtitle_url:'https://aisubtitle.hdslb.com/fixture.json'}]}}};
           else payload={body:transcript.map(s=>({from:s.start,to:s.start+s.duration,content:s.text}))};
           return new Response(JSON.stringify(payload),{headers:{'Content-Type':'application/json'}});
         }
@@ -52,7 +54,7 @@ function attachClient(rootSession,sessionId){
         }
         if(String(url).startsWith('https://'))throw new Error('LIVE PROVIDER DISABLED IN FIXTURE TEST');return original(url,options);
       };
-    },{bili,fixtureId});
+    },{bili,fixtureId,asr});
     for(const p of context.pages())if(p.url().includes('options.html'))await p.close();
     await context.route(bili?'https://www.bilibili.com/**':'https://www.youtube.com/**',route=>route.fulfill({contentType:'text/html',body:`<!doctype html><html><head><meta charset="UTF-8"><title>English practice fixture</title><style>video{width:600px;height:300px;background:#ddd}ytd-watch-metadata{display:block}</style></head><body><h1 class="video-title">英语学习测试视频</h1><div class="video-toolbar-left"></div><div class="recommend-list-v1">推荐</div><div id="movie_player" class="html5-video-player"><video muted></video></div><ytd-watch-metadata><div id="actions-inner" style="width:400px;height:40px"><div id="top-level-buttons-computed" style="width:400px;height:40px">Share</div></div></ytd-watch-metadata><div id="comments">Comments</div><ytd-watch-next-secondary-results-renderer>Recommendations</ytd-watch-next-secondary-results-renderer></body></html>`}));
     const video=await context.newPage();await video.goto(bili?'https://www.bilibili.com/video/BV1xx411c7mD/?p=2':'https://www.youtube.com/watch?v=abcDEF12345');
@@ -66,6 +68,42 @@ function attachClient(rootSession,sessionId){
     assert.deepEqual(await panel.evaluate(()=>[...document.querySelectorAll('.tab')].map(e=>e.textContent.trim())),['字幕','概览','收藏库','学习']);
     if(bili){assert.equal(await worker.evaluate(()=>__nativeCalls.length),4);assert.ok(await worker.evaluate(()=>__nativeCalls.some(u=>u.includes('cid=20'))));}
 
+    if(asr){
+      let complete=false,starts=0,cancelled=false;
+      const result={videoId:fixtureId,language:'en',source:'local-asr',transcript:[{text:'An object at rest stays at rest. An object in motion stays in motion.',start:0,duration:12},{text:'The book which she recommended changed my perspective.',start:22,duration:12}]};
+      asrServer=require('node:http').createServer((req,res)=>{
+        res.setHeader('Content-Type','application/json');res.setHeader('Access-Control-Allow-Origin',`chrome-extension://${extensionId}`);res.setHeader('Access-Control-Allow-Headers','Content-Type, X-Study-Extension');res.setHeader('Access-Control-Allow-Methods','GET, POST, DELETE');
+        if(req.method==='OPTIONS'){res.writeHead(204);res.end();return;}
+        assert.equal(req.headers['x-study-extension'],extensionId);
+        let body='';req.on('data',chunk=>body+=chunk);req.on('end',()=>{
+          if(req.method==='POST'){starts++;cancelled=false;assert.equal(JSON.parse(body).videoId,fixtureId);}
+          if(req.method==='DELETE')cancelled=true;
+          res.end(JSON.stringify({id:'a'.repeat(32),videoId:fixtureId,status:cancelled?'cancelled':complete?'completed':'transcribing',message:cancelled?'已取消':complete?'转写完成':'正在转写英文原声',progress:complete?100:30,...(complete?{result}:{})}));
+        });
+      });await new Promise((resolve,reject)=>{asrServer.once('error',reject);asrServer.listen(8766,'127.0.0.1',resolve);});
+      await panel.click('[data-transcript-mode="bilingual"]');
+      assert.equal(await worker.evaluate(()=>__fixtureCalls.length),0,'Chinese source never translates Chinese to Chinese');
+      assert.ok(await panel.evaluate(()=>document.getElementById('localAsrStatus').textContent.includes('转写英文原声')));
+      await panel.click('#localAsrStart');await until(()=>panel.evaluate(()=>!document.getElementById('localAsrCancel').hidden),'cancel available');
+      await panel.click('#localAsrCancel');await until(()=>panel.evaluate(()=>document.getElementById('localAsrStatus').textContent.includes('已取消')),'cancelled');
+      assert.ok(await panel.evaluate(()=>document.querySelector('.transcript-text').textContent.includes('静止')),'cancel preserves Chinese');
+      complete=true;await panel.click('#localAsrStart');
+      await until(()=>panel.evaluate(()=>document.querySelector('.transcript-text')?.textContent.includes('An object at rest')),'English ASR applied');
+      assert.equal(starts,2);
+      const stored=await worker.evaluate(async fixtureId=>(await chrome.storage.local.get('digest_'+fixtureId))['digest_'+fixtureId],fixtureId);
+      assert.equal(stored.transcriptSource,'local-asr');assert.equal(stored.nativeTranscriptBackup.language,'ai-zh');
+      await panel.click('[data-transcript-mode="bilingual"]');
+      assert.ok(await panel.evaluate(()=>document.querySelector('.transcript-original').textContent.includes('An object')));
+      assert.ok(await panel.evaluate(()=>document.querySelector('.transcript-translation').textContent.includes('静止')));
+      assert.equal(await worker.evaluate(()=>__fixtureCalls.length),0,'Chinese alignment uses original track, not AI rewrite');
+      await panel.screenshot('09-original-asr.png');
+      await panel.click('#localAsrRestore');await until(()=>panel.evaluate(()=>document.querySelector('.transcript-text')?.textContent.includes('静止')),'restore native');
+      const before=await panel.evaluate(()=>document.getElementById('transcriptList').textContent);
+      assert.ok(await panel.evaluate(async result=>{try{await YTD_PANEL.applyASR({...result,videoId:'BV1xx411c7mD_p3'});return false;}catch{return true;}},result),'wrong video rejected');
+      assert.equal(await panel.evaluate(()=>document.getElementById('transcriptList').textContent),before);
+      assert.deepEqual(panel.errors,[]);fs.writeFileSync(path.join(out,'result.json'),JSON.stringify({passed:true,checks:['Chinese-no-retranslation','ASR-cancel','ASR-apply','native-backup','bilingual-original-alignment','native-restore','wrong-video-rejected'],errors:panel.errors},null,2));
+      console.log('PASS: local original-audio ASR integration');return;
+    }
     await sleep(400); // The panel's entry animation must settle before hit testing.
     // A real pointer dwell must not call the provider early or save automatically.
     const point=await panel.evaluate(()=>{const root=document.querySelector('.transcript-text'),r=document.createRange();r.setStart(root.firstChild,0);r.setEnd(root.firstChild,11);const b=r.getBoundingClientRect();return {x:b.left+15,y:b.top+b.height/2};});
@@ -185,5 +223,5 @@ function attachClient(rootSession,sessionId){
     console.log('PASS: extension load, 600ms hover, quick movement, stale results, cached save, bilingual cross-row sentence, tags, real playback/background accounting, deadline pause, extension, DOCX download, review and cleanup');
     fs.writeFileSync(path.join(out,'result.json'),JSON.stringify({passed:true,platform:bili?'bilibili':'youtube',checks:['chinese-settings-no-supadata','chinese-ui','second-countdown','follow-playback','hover','quick-movement','stale-results','cache','bilingual-sentence-range','tags','real-playback','background-accounting','deadline-pause','extend','docx','review','cleanup'],errors:panel.errors},null,2));
   }catch(error){if(panel){console.error('PANEL',await panel.evaluate(()=>document.body.innerText).catch(()=>''));await panel.screenshot('failure.png').catch(()=>{});}throw error;}
-  finally{await context.close();fs.rmSync(profile,{recursive:true,force:true,maxRetries:5,retryDelay:200});}
+  finally{if(asrServer)await new Promise(resolve=>asrServer.close(resolve));await context.close();fs.rmSync(profile,{recursive:true,force:true,maxRetries:5,retryDelay:200});}
 })().catch(error=>{console.error(error.stack);process.exitCode=1;});

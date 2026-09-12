@@ -26,3 +26,8 @@ dist/
 
 # Local browser verification artifacts
 test-results/
+
+# Local ASR runtime, model, temporary audio, and user-specific pairing
+local-asr/.local/
+__pycache__/
+*.pyc

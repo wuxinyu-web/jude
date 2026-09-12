@@ -49,6 +49,7 @@ public_allowlist=(
   "PRIVACY.md"
   "SECURITY.md"
   "LICENSE"
+  "lib/local-asr.js"
   "lib/platform.js"
   "lib/wbi.js"
   "lib/bili-api.js"

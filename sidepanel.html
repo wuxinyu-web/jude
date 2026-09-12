@@ -38,6 +38,16 @@
 
     <!-- MAIN CONTENT -->
     <div class="content" id="contentArea">
+      <section id="localAsrPanel" class="local-asr-panel" hidden aria-label="英文原声转写">
+        <div class="learning-actions">
+          <button class="learning-button" id="localAsrStart" type="button">转写英文原声</button>
+          <button class="learning-button" id="localAsrCancel" type="button" hidden>取消转写</button>
+          <button class="learning-button" id="localAsrApply" type="button" hidden>载入英文转写</button>
+          <button class="learning-button" id="localAsrRestore" type="button" hidden>恢复原站字幕</button>
+        </div>
+        <p id="localAsrStatus" role="status"></p>
+        <progress id="localAsrProgress" max="100" value="0" hidden aria-label="原声转写进度"></progress>
+      </section>
       <!-- WELCOME STATE -->
       <div id="welcomeState" class="welcome-container">
         <div class="welcome-icon">&#9655;</div>
@@ -299,5 +309,6 @@
     <script src="lib/word-export.js"></script>
     <script src="sidepanel.js"></script>
     <script src="lib/learning-ui.js"></script>
+    <script src="lib/local-asr.js"></script>
   </body>
 </html>
