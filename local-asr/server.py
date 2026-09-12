@@ -80,8 +80,9 @@ class Jobs:
         if proc and proc.poll() is not None and status['status'] not in TERMINAL:
             status.update(status='failed', message='转写进程已退出，请重试或检查本地服务日志。')
             write_json(self.root / job_id / 'status.json', status)
-        if status['status'] == 'completed':
-            status['result'] = read_json(self.root / job_id / 'result.json')
+        result = read_json(self.root / job_id / 'result.json')
+        if result:
+            status['result'] = result
         return status
 
     def cancel(self, job_id):
@@ -97,7 +98,7 @@ class Jobs:
                 except subprocess.TimeoutExpired:
                     os.killpg(proc.pid, signal.SIGKILL)
                     proc.wait(timeout=4)
-            status.update(status='cancelled', message='已取消；原字幕和收藏保持不变。')
+            status.update(status='cancelled', message='已取消；已生成的英文、原字幕和收藏均保留。')
             write_json(self.root / job_id / 'status.json', status)
             # Only remove this service's own temporary downloaded audio.
             for path in (self.root / job_id).glob('audio*'):

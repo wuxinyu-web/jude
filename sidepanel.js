@@ -44,6 +44,7 @@ let closeActiveExplanationModal = null;
 // The public transcript control intentionally supports only the original
 // subtitles, Chinese, and an aligned source + Chinese view.
 let currentTranscriptMode = /[?&]immersive=1(?:&|$)/.test(globalThis.location?.search||"") ? "bilingual" : "original";
+let currentTranscriptPartial = false;
 let pendingOriginalAudioMode = currentTranscriptMode === "bilingual" ? "bilingual" : null;
 let currentOverviewMode = "original";
 let translationGeneration = 0; // Invalidates responses from older UI modes/videos.
@@ -952,6 +953,7 @@ async function startDigest(videoId, videoUrl) {
   currentTranscriptTimestamped = null;
   currentTranscriptLanguage = null;
   currentTranscriptSource = "native";
+  currentTranscriptPartial=false;
   currentNativeTranscriptBackup = null;
 
   await loadPendingTranscriptViewState(requestSnapshot);
@@ -975,6 +977,7 @@ async function startDigest(videoId, videoUrl) {
     currentTranscriptTimestamped = cached.transcriptTimestamped;
     currentTranscriptLanguage = cached.transcriptLanguage || null;
     currentTranscriptSource = cached.transcriptSource || "native";
+    currentTranscriptPartial=Boolean(cached.transcriptPartial);
     currentNativeTranscriptBackup = cached.nativeTranscriptBackup || null;
 
     // Restore semantic-segment translations from persistent storage.
@@ -3264,6 +3267,7 @@ async function saveToCache(videoId, requestSnapshot = null) {
       transcriptTimestamped: currentTranscriptTimestamped,
       transcriptLanguage: currentTranscriptLanguage,
       transcriptSource: currentTranscriptSource,
+      transcriptPartial: currentTranscriptPartial,
       nativeTranscriptBackup: currentNativeTranscriptBackup,
       videoTitle: currentVideoTitle,
       channelName: currentChannelName,
@@ -3654,6 +3658,7 @@ function highlightActiveEntry(currentSeconds) {
     }
   });
 
+  if(currentTranscriptPartial && currentTranscript?.length){const last=currentTranscript[currentTranscript.length-1];if(currentSeconds>=last.start+last.duration){entries.forEach(e=>e.classList.remove('active-playback'));return;}}
   if (!activeEntry) return;
 
   // Skip if this entry is already highlighted (no DOM thrashing)
@@ -4296,7 +4301,7 @@ globalThis.__YTD_RACE_TESTING__ = {
 globalThis.YTD_PANEL = {
   context: () => ({ videoId: currentVideoId, videoTitle: currentVideoTitle,
     channelName: currentChannelName, tabId: youtubeTabId, generation: digestGeneration,
-    segments: getActiveTranscriptSegments(), libraryView: currentLibraryView, source:currentTranscriptSource, language:currentTranscriptLanguage, hasNativeBackup:Boolean(currentNativeTranscriptBackup) }),
+    segments: getActiveTranscriptSegments(), libraryView: currentLibraryView, source:currentTranscriptSource, language:currentTranscriptLanguage, hasNativeBackup:Boolean(currentNativeTranscriptBackup), partial:currentTranscriptPartial }),
   setTranscriptMode:handleTranscriptModeChange,
   rawSegments:()=>currentTranscript||[],
   captionTranslation:segment=>{
@@ -4304,7 +4309,7 @@ globalThis.YTD_PANEL = {
     const group=getActiveTranscriptSegments().find(g=>g.start<=segment.start&&g.start+g.duration>segment.start);
     return group?transcriptParagraphCache.get(transcriptTranslationCacheKey(group))||"":"";
   },
-  applyASR: applyOriginalAudioTranscript, restoreNativeTranscript,
+  applyASR: applyOriginalAudioTranscript, applyASRProgress:applyOriginalAudioProgress, restoreNativeTranscript,
   vocabulary: () => vocabularyEntries,
   refreshVocabulary: refreshVocabularyEntries,
   switchLibraryView, switchTab,
@@ -4321,6 +4326,20 @@ async function applyOriginalAudioTranscript(input) {
   if(currentTranscriptSource!=="local-asr" && currentTranscript?.length)currentNativeTranscriptBackup={transcript:currentTranscript,language:currentTranscriptLanguage,source:currentTranscriptSource};
   await replaceTranscriptSource(result,snapshot);
 }
+async function applyOriginalAudioProgress(input){
+  const result=YTD_ASR_CORE.validateResult(input,currentVideoId);
+  if(currentTranscriptSource!=='local-asr')return applyOriginalAudioTranscript(result);
+  // A re-transcription must not replace a previously complete transcript with a fragment.
+  if(!currentTranscriptPartial && result.partial)return;
+  if(result.partial&&currentTranscript?.length&&result.transcript.length<currentTranscript.length)return;
+  const snapshot={generation:digestGeneration,videoId:currentVideoId},area=document.getElementById('contentArea'),top=area.scrollTop,mode=currentTranscriptMode;
+  currentTranscript=result.transcript;currentTranscriptPartial=Boolean(result.partial);
+  currentTranscriptText=currentTranscript.map(s=>s.text).join(' ');
+  currentTranscriptTimestamped=currentTranscript.map(s=>`[${Math.floor(s.start/60)}:${String(Math.floor(s.start%60)).padStart(2,'0')}] ${s.text}`).join('\n');
+  // Reuse the renderer and preserve the reading position; never seek or pause the player.
+  renderTranscript();if(mode!=='original')await translateTranscript();area.scrollTop=top;
+  await saveToCache(currentVideoId,snapshot);globalThis.YTD_ASR_UI?.refresh();
+}
 async function restoreNativeTranscript(){
   if(!currentNativeTranscriptBackup)return;
   const backup=currentNativeTranscriptBackup;currentNativeTranscriptBackup=null;
@@ -4335,7 +4354,7 @@ async function replaceTranscriptSource(result,snapshot){
   closeActiveExplanationModal?.();transcriptScrollObserver?.disconnect();transcriptScrollObserver=null;
   currentAnalysis=null;isAnalysisLoading=false;currentTranscriptMode="original";setTranscriptModeButtons("original");
   transcriptParagraphCache=new Map([...transcriptParagraphCache].filter(([key])=>!key.startsWith(`${currentVideoId}:`)));
-  currentTranscript=result.transcript;currentTranscriptLanguage=result.language;currentTranscriptSource=result.source;
+  currentTranscript=result.transcript;currentTranscriptPartial=Boolean(result.partial);currentTranscriptLanguage=result.language;currentTranscriptSource=result.source;
   currentTranscriptText=currentTranscript.map(item=>item.text).join(" ");
   currentTranscriptTimestamped=currentTranscript.map(item=>`[${Math.floor(item.start/60)}:${String(Math.floor(item.start%60)).padStart(2,"0")}] ${item.text}`).join("\n");
   resetTranscriptSearchForVideo(currentVideoId);stopPlaybackTracking();renderTranscript();showState("results");

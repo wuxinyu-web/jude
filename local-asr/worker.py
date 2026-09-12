@@ -76,9 +76,9 @@ def main():
             raise ValueError('视频中没有足够的可识别音频。')
         duration = len(audio)/16000
         segments = []
-        # Two-minute batches keep progress visible and cancellation responsive.
+        # Thirty-second batches publish usable captions before the whole job finishes.
         # A small overlap supplies context; midpoint ownership deduplicates boundaries.
-        chunk_seconds = 120
+        chunk_seconds = 30
         for offset in range(0, math.ceil(duration), chunk_seconds):
             begin = max(0, offset-2)
             end = min(duration, offset+chunk_seconds+2)
@@ -97,12 +97,23 @@ def main():
                 start = max(0, min(start, duration));finish=max(start,min(finish,duration))
                 if finish > start:
                     segments.append({'text':text,'start':start,'duration':finish-start})
+            segments.sort(key=lambda item:item['start'])
+            if segments:
+                partial = {'videoId':video_id,'transcript':list(segments),'language':'en','source':'local-asr',
+                    'partial':True,'revision':offset//chunk_seconds+1,'processedUntil':min(duration,offset+chunk_seconds)}
+                write_json(folder/'result.json',partial)
+                # Existing running server versions already return status.json;
+                # including the snapshot keeps progressive delivery compatible.
+                status['result']=partial
+                done=min(duration,offset+chunk_seconds)
+                update('transcribing',f'边看边转写：已生成 {int(done)//60}:{int(done)%60:02d}，继续处理后续原声',18+int(done/duration*80))
         segments.sort(key=lambda item:item['start'])
         if not segments:
             raise ValueError('未识别到可用英文语音；原字幕未被替换。')
         result = {'videoId':video_id,'transcript':segments,'language':'en','source':'local-asr',
             'engine':'Whisper small.en','duration':duration,'createdAt':time.time(),
             'videoTitle':str(info.get('title','')),'notice':'英文原声自动转写，可能有识别误差，请结合音频核对。'}
+        status.pop('result',None)
         write_json(folder/'result.json',result)
         update('completed', '英文原声转写完成，可以载入字幕。', 100)
     except Exception as error:

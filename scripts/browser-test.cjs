@@ -137,8 +137,9 @@ function attachClient(rootSession,sessionId){
     }
 
     if(asr){
-      let complete=false,starts=0,cancelled=false;
+      let complete=false,starts=0,cancelled=false,partialCount=0;
       const result={videoId:fixtureId,language:'en',source:'local-asr',transcript:[{text:'An object at rest stays at rest. An object in motion stays in motion.',start:0,duration:12},{text:'The book which she recommended changed my perspective.',start:22,duration:12}]};
+      if(process.env.YTD_TEST_PROGRESSIVE==='1')for(let i=0;i<20;i++)result.transcript.push({text:`This is original audio caption number ${i+3}.`,start:36+i*4,duration:3});
       asrServer=require('node:http').createServer((req,res)=>{
         res.setHeader('Content-Type','application/json');res.setHeader('Access-Control-Allow-Origin',`chrome-extension://${extensionId}`);res.setHeader('Access-Control-Allow-Headers','Content-Type, X-Study-Extension');res.setHeader('Access-Control-Allow-Methods','GET, POST, DELETE');
         if(req.method==='OPTIONS'){res.writeHead(204);res.end();return;}
@@ -146,7 +147,7 @@ function attachClient(rootSession,sessionId){
         let body='';req.on('data',chunk=>body+=chunk);req.on('end',()=>{
           if(req.method==='POST'){starts++;cancelled=false;assert.equal(JSON.parse(body).videoId,fixtureId);if(process.env.YTD_TEST_AUTO_ASR==='1'&&starts===1){res.writeHead(503);res.end(JSON.stringify({error:'测试：本地转写服务暂不可用'}));return;}}
           if(req.method==='DELETE')cancelled=true;
-          res.end(JSON.stringify({id:'a'.repeat(32),videoId:fixtureId,status:cancelled?'cancelled':complete?'completed':'transcribing',message:cancelled?'已取消':complete?'转写完成':'正在转写英文原声',progress:complete?100:30,...(complete?{result}:{})}));
+          res.end(JSON.stringify({id:'a'.repeat(32),videoId:fixtureId,status:cancelled?'cancelled':complete?'completed':'transcribing',message:cancelled?'已取消':complete?'转写完成':'正在转写英文原声',progress:complete?100:30,...(complete?{result}:partialCount?{result:{...result,partial:true,revision:partialCount,transcript:result.transcript.slice(0,partialCount)}}:{})}));
         });
       });await new Promise((resolve,reject)=>{asrServer.once('error',reject);asrServer.listen(Number(process.env.YTD_TEST_ASR_PORT)||8766,'127.0.0.1',resolve);});
       if(process.env.YTD_TEST_AUTO_ASR==='1'){
@@ -160,12 +161,23 @@ function attachClient(rootSession,sessionId){
         await until(async()=>await frame.getByRole('button',{name:'取消转写',exact:true}).isVisible(),'inline cancel');assert.equal(starts,2);
         await frame.getByRole('button',{name:'取消转写',exact:true}).click();await until(async()=>(await frame.locator('#localAsrStatus').innerText()).includes('已取消'),'inline cancelled');
         await sleep(2200);assert.equal(starts,2,'cancel does not restart');
-        complete=true;await frame.locator('[data-transcript-mode=bilingual]').click();
+        if(process.env.YTD_TEST_PROGRESSIVE==='1'){
+          partialCount=19;
+          await video.evaluate(async()=>{const canvas=document.createElement('canvas');canvas.width=40;canvas.height=30;window.liveFixture=setInterval(()=>canvas.getContext('2d').fillRect(0,0,40,30),100);const v=document.querySelector('video');v.srcObject=canvas.captureStream(10);await v.play();});
+          await frame.locator('[data-transcript-mode=bilingual]').click();
+          await until(async()=>(await frame.locator('#localAsrStatus').innerText()).includes('19 / 20'),'nineteen captions visibly buffering');
+          assert.equal(await frame.evaluate(()=>YTD_PANEL.context().language),'ai-zh','Chinese stays visible before first buffer');
+          partialCount=20;await until(()=>frame.evaluate(()=>YTD_PANEL.context().partial&&YTD_PANEL.rawSegments().length===20),'twenty captions release first English buffer');
+          assert.equal(await video.locator('video').evaluate(v=>v.paused),false,'ASR does not pause viewing');
+          await frame.goto(frame.url());await until(()=>frame.evaluate(()=>YTD_PANEL.context().partial&&YTD_ASR_UI.state().running),'resume partial job after panel reload');assert.equal(starts,3);
+          partialCount=21;await until(()=>frame.evaluate(()=>YTD_PANEL.rawSegments().length===21),'next segment appended before completion');
+          complete=true;await until(()=>frame.evaluate(()=>!YTD_PANEL.context().partial),'completion clears partial marker');
+        }else{complete=true;await frame.locator('[data-transcript-mode=bilingual]').click();}
         await until(async()=>(await frame.locator('#transcriptList').innerText()).includes('An object'),'English applied without leaving immersion');
         assert.ok((await frame.locator('.transcript-translation').first().innerText()).includes('静止'));assert.equal(starts,3);assert.equal(await worker.evaluate(()=>__fixtureCalls.length),0);
         await video.screenshot({path:path.join(out,'auto-asr-bilingual.png')});
         assert.equal(starts,3);
-        fs.writeFileSync(path.join(out,'result.json'),JSON.stringify({passed:true,checks:['automatic-start','failure-visible','no-retry-loop','inline-cancel','inline-retry','auto-bilingual','native-Chinese-retained','no-cloud-translation','sticky-progress-after-scroll','Chinese-button-selection','bilingual-click-retry']}));panel=null;console.log('PASS: automatic immersive ASR, failure, cancellation and bilingual completion');return;
+        fs.writeFileSync(path.join(out,'result.json'),JSON.stringify({passed:true,checks:['automatic-start','failure-visible','no-retry-loop','inline-cancel','inline-retry','auto-bilingual','native-Chinese-retained','no-cloud-translation','sticky-progress-after-scroll','Chinese-button-selection','bilingual-click-retry',...(process.env.YTD_TEST_PROGRESSIVE==='1'?['buffer-19-waits','buffer-20-releases','video-keeps-playing','resume-partial','background-appends','completion-clears-marker']:[])]}));panel=null;console.log('PASS: automatic immersive ASR, failure, cancellation and bilingual completion');return;
       }
       await panel.click('[data-transcript-mode="bilingual"]');
       assert.equal(await worker.evaluate(()=>__fixtureCalls.length),0,'Chinese source never translates Chinese to Chinese');

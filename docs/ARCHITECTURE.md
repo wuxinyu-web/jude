@@ -79,3 +79,10 @@ Immersion now shows the existing transcript pane, with its shared rendering, bil
 
 
 1.10.1 tracks the requested caption mode while Chinese-only audio is being prepared. A bilingual click invokes ensureAutomatic({retry:true}), bypassing only the prior-attempt marker while retaining running-job reuse. The existing ASR panel moves inside the sticky transcript controls in immersion, preserving all handlers and status updates. Browser regression covers scrolled failure status, language selection, explicit retry, cancellation and automatic completion.
+
+
+## 1.11.0 progressive original-audio transcription
+
+The local worker publishes atomic partial snapshots after each 30-second chunk, with revision and processedUntil metadata. Result snapshots also appear in status.json for compatibility with an already-running old server. The extension deduplicates by job/status/revision/count, validates each snapshot and keeps transcriptPartial in the existing digest cache. First application preserves native Chinese; later updates reuse the renderer without seeking/pausing the video, preserve scroll position and do not recreate study timers. Reopening a partial transcript resumes the job; completion clears the marker. Cancelled/failed jobs retain generated captions. The last unfinished segment is not highlighted beyond its timestamp range.
+
+The first English snapshot is buffered until 20 subtitle entries are available; completed short transcripts bypass this threshold. Existing English receives later progressive updates immediately. The status exposes the initial buffer count. Tests cover 19 waiting, 20 releasing, background appends and continued actual HTMLVideoElement playback.

@@ -56,6 +56,15 @@ class ServiceTest(unittest.TestCase):
         self.assertEqual(status['status'],'cancelled');self.assertIsNotNone(proc.poll());self.assertFalse((folder/'audio.m4a').exists())
         self.assertEqual(self.jobs.cancel(job_id)['status'],'cancelled')
 
+    def test_running_and_cancelled_jobs_expose_partial_results(self):
+        job_id='b'*32;folder=Path(self.temp.name)/job_id;folder.mkdir()
+        partial=dict(videoId='BV1bfLwz1Eu4',language='en',source='local-asr',partial=True,revision=1,transcript=[dict(text='Hello.',start=0,duration=1)])
+        write_json(folder/'status.json',dict(id=job_id,videoId='BV1bfLwz1Eu4',status='transcribing'))
+        write_json(folder/'result.json',partial)
+        self.assertTrue(self.jobs.get(job_id)['result']['partial'])
+        self.jobs.cancel(job_id)
+        self.assertEqual(self.jobs.get(job_id)['result'],partial)
+
     def test_cancel_is_idempotent_for_completed_job(self):
         job_id='f'*32;folder=Path(self.temp.name)/job_id;folder.mkdir();write_json(folder/'status.json',dict(id=job_id,videoId='BV1bfLwz1Eu4',status='completed'))
         self.assertEqual(self.jobs.cancel(job_id)['status'],'completed')
