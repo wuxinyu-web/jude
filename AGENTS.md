@@ -5,7 +5,7 @@
 ## Boundaries
 
 - User-approved Study and sentence features replace Ask and web search. Do not restore retired request handlers, host permissions or keys.
-- Bilibili uses native site subtitles first with explicit login/no-subtitle failures; explicit local original-audio transcription is available through the paired loopback service. Never translate Chinese captions and label the result as original English audio. YouTube Supadata native mode is always first; audio generation requires an explicit user confirmation after no native transcript. Never call paid providers in automated tests.
+- Bilibili uses native site subtitles first with explicit login/no-subtitle failures; local original-audio transcription is available through the paired loopback service. User-authorized automatic local ASR starts when entering immersion with Chinese-only Bilibili captions; retain visible progress/cancel/retry, reuse jobs, and never loop-retry failures. Never translate Chinese captions and label the result as original English audio. YouTube Supadata native mode is always first; audio generation requires an explicit user confirmation after no native transcript. Never call paid providers in automated tests.
 - Keep original Notes and Vocabulary schema/IDs; keep the 500-entry vocabulary cap and separate 500-entry sentence cap. Never silently evict collections.
 - Source sentences are durable before AI analysis; failures remain retryable. Deletion/manual tag edits must survive in-flight completions.
 - All provider output is untrusted bounded plain text. Prompts treat transcript/metadata as quoted data, not instructions. Never put real secrets in source, fixtures, logs, exports or packages.

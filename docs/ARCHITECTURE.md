@@ -66,3 +66,8 @@ layout-worker 管理布局偏好和原生侧栏开关；layout-content 用可撤
 ### 1.9.1 contextual layout and bilingual queue
 
 The panel exposes direct immersive entry and context-dependent dock positioning; the Settings selector remains compatible with saved preferences. Immersive Chinese is enabled by default. Existing/native Chinese is preferred, otherwise `translateContent` translates the exact raw cue through the established worker. A bounded 150-entry in-page queue/cache serializes requests, retains only the latest pending cue, keys entries by video/generation/cue and keeps explicit failures until retry. Chinese-only sources are not translated into purported original English.
+
+
+## 1.9.2 自动原声准备
+
+Immersive Chinese-only detection calls local-asr ensureAutomatic once per video. It awaits saved-job restoration, reuses completed/running jobs, and stores a session attempt marker to prevent repeated failure starts across iframe recreation. Progress events reuse local-asr polling; inline cancel/retry use the same controller as the full panel. Auto-applied ASR retains the native Chinese backup and existing video/generation checks.

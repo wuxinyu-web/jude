@@ -182,11 +182,28 @@ function attachClient(rootSession,sessionId){
         if(req.method==='OPTIONS'){res.writeHead(204);res.end();return;}
         assert.equal(req.headers['x-study-extension'],extensionId);
         let body='';req.on('data',chunk=>body+=chunk);req.on('end',()=>{
-          if(req.method==='POST'){starts++;cancelled=false;assert.equal(JSON.parse(body).videoId,fixtureId);}
+          if(req.method==='POST'){starts++;cancelled=false;assert.equal(JSON.parse(body).videoId,fixtureId);if(process.env.YTD_TEST_AUTO_ASR==='1'&&starts===1){res.writeHead(503);res.end(JSON.stringify({error:'测试：本地转写服务暂不可用'}));return;}}
           if(req.method==='DELETE')cancelled=true;
           res.end(JSON.stringify({id:'a'.repeat(32),videoId:fixtureId,status:cancelled?'cancelled':complete?'completed':'transcribing',message:cancelled?'已取消':complete?'转写完成':'正在转写英文原声',progress:complete?100:30,...(complete?{result}:{})}));
         });
-      });await new Promise((resolve,reject)=>{asrServer.once('error',reject);asrServer.listen(8766,'127.0.0.1',resolve);});
+      });await new Promise((resolve,reject)=>{asrServer.once('error',reject);asrServer.listen(Number(process.env.YTD_TEST_ASR_PORT)||8766,'127.0.0.1',resolve);});
+      if(process.env.YTD_TEST_AUTO_ASR==='1'){
+        await panel.click('#enterImmersive');let frame;
+        await until(async()=>{frame=video.frames().find(f=>f.url().includes('immersive=1'));return frame&&(await frame.locator('.immersive-translation').innerText()).includes('暂不可用');},'automatic ASR failure visible');
+        assert.equal(starts,1);await sleep(2500);assert.equal(starts,1,'failure does not automatically loop');
+        await frame.getByRole('button',{name:'重试当前视频的英文原声转写',exact:true}).click();
+        await until(async()=>await frame.getByRole('button',{name:'取消当前英文原声转写',exact:true}).isVisible(),'inline cancel');assert.equal(starts,2);
+        await frame.getByRole('button',{name:'取消当前英文原声转写',exact:true}).click();await until(async()=>(await frame.locator('.immersive-translation').innerText()).includes('已取消'),'inline cancelled');
+        await sleep(2200);assert.equal(starts,2,'cancel does not restart');
+        complete=true;await frame.getByRole('button',{name:'重试当前视频的英文原声转写',exact:true}).click();
+        await until(async()=>(await frame.locator('#immersiveCue').innerText()).includes('An object'),'English applied without leaving immersion');
+        assert.ok((await frame.locator('.immersive-translation').innerText()).includes('静止'));assert.equal(starts,3);assert.equal(await worker.evaluate(()=>__fixtureCalls.length),0);
+        await video.screenshot({path:path.join(out,'auto-asr-bilingual.png')});
+        await frame.getByRole('button',{name:'返回完整字幕和学习工具',exact:true}).click();
+        await until(async()=>{frame=video.frames().find(f=>f.url().includes('embedded=1')&&!f.url().includes('immersive=1'));return frame&&await frame.locator('#enterImmersive').isVisible();},'expand after ASR');
+        await frame.locator('#enterImmersive').click();await until(async()=>{frame=video.frames().find(f=>f.url().includes('immersive=1'));return frame&&(await frame.locator('#immersiveCue').innerText()).includes('An object');},'cached English on reentry');assert.equal(starts,3);
+        fs.writeFileSync(path.join(out,'result.json'),JSON.stringify({passed:true,checks:['automatic-start','failure-visible','no-retry-loop','inline-cancel','inline-retry','auto-bilingual','native-Chinese-retained','no-cloud-translation','cached-reentry']}));panel=null;console.log('PASS: automatic immersive ASR, failure, cancellation and bilingual completion');return;
+      }
       await panel.click('[data-transcript-mode="bilingual"]');
       assert.equal(await worker.evaluate(()=>__fixtureCalls.length),0,'Chinese source never translates Chinese to Chinese');
       assert.ok(await panel.evaluate(()=>document.getElementById('localAsrStatus').textContent.includes('转写英文原声')));

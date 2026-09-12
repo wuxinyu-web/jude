@@ -1,3 +1,7 @@
+## 1.9.2：沉浸模式自动准备英文原声
+
+进入沉浸模式后，B 站视频若只有中文字幕，会自动连接本机转写服务，优先恢复已有任务或使用完成结果；没有任务时才开始转写。台词区显示进度，可直接取消或重试，完成后自动切换英文与原站中文对照。服务不可用会明确提示；失败或取消后当前浏览器会话不自动反复重试。不把中文反译成英文原声，不自动调用云端转写。需安装并启动本地服务，说明见 local-asr/README.md。
+
 ## 1.9.1: Direct controls and automatic bilingual immersion
 
 Click 专心看 to enlarge the player and show synchronized English / Chinese captions. 展开字幕 returns to the full workspace; contextual 放到下方 / 收至右侧 buttons move it without a three-mode picker. Settings retain the default layout preference. Resize and fullscreen still include the captions.
