@@ -94,6 +94,19 @@ function attachClient(rootSession,sessionId){
       assert.deepEqual(toolbar,{offset:0,close:'×',styles:1});
       const geometry=await video.evaluate(()=>({p:document.querySelector('#movie_player').getBoundingClientRect().toJSON(),d:document.querySelector('#ytd-layout-dock').getBoundingClientRect().toJSON()}));assert.ok(geometry.p.height>=600);assert.ok(Math.abs(geometry.p.bottom-geometry.d.top)<2);
       await video.getByRole('separator').focus();await video.keyboard.press('ArrowUp');await until(()=>worker.evaluate(async()=>(await chrome.storage.local.get('ytd_layout_preferences')).ytd_layout_preferences.immersiveHeight===35),'resize height persists');
+      // Real pointer movement crosses the iframe and exceeds the former 45vh cap.
+      const grip=await video.getByRole('separator').boundingBox();
+      await video.mouse.move(grip.x+grip.width/2,grip.y+grip.height/2);await video.mouse.down();
+      await video.mouse.move(grip.x+grip.width/2,grip.y+grip.height/2-270,{steps:12});await video.mouse.up();
+      await until(()=>worker.evaluate(async()=>Math.abs((await chrome.storage.local.get('ytd_layout_preferences')).ytd_layout_preferences.immersiveHeight-65)<1),'upward drag expands to 65 percent');
+      assert.equal(await video.locator('#ytd-layout-dock').getAttribute('data-resizing'),null);
+      const edge=await video.locator('#resizeEdge').boundingBox();
+      await video.mouse.move(edge.x+100,edge.y+5);await video.mouse.down();
+      await video.mouse.move(edge.x+100,edge.y+410,{steps:12});await video.mouse.up();
+      await until(()=>worker.evaluate(async()=>Math.abs((await chrome.storage.local.get('ytd_layout_preferences')).ytd_layout_preferences.immersiveHeight-20)<1),'downward boundary drag shrinks to 20 percent');
+      await video.getByRole('separator').dblclick();
+      await until(()=>worker.evaluate(async()=>(await chrome.storage.local.get('ytd_layout_preferences')).ytd_layout_preferences.immersiveHeight===30),'double click resets height');
+      await video.getByRole('separator').focus();await video.keyboard.press('ArrowUp');
       await frame.locator('[data-transcript-mode=original]').click();assert.equal(await frame.locator('.transcript-original').count(),0);await frame.locator('[data-transcript-mode=bilingual]').click();
       await frame.locator('#contentArea').evaluate(e=>e.scrollTop=0);await sleep(600);await video.screenshot({path:path.join(out,'before-hover.png')});
       const point=await frame.locator('.transcript-original').first().evaluate(e=>{const w=document.createTreeWalker(e,NodeFilter.SHOW_TEXT);const n=w.nextNode();const r=document.createRange();r.setStart(n,0);r.setEnd(n,Math.min(8,n.length));const b=r.getBoundingClientRect();return {x:b.x+b.width/2,y:b.y+b.height/2};});const offset=await video.locator('#ytd-layout-dock iframe').boundingBox();await video.mouse.move(offset.x+point.x,offset.y+point.y);

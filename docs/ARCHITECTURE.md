@@ -90,3 +90,5 @@ The first English snapshot is buffered until 20 subtitle entries are available; 
 1.11.1 host controls overlay the same 40px toolbar row as iframe transcript controls. Only host buttons accept pointer events; the remaining header surface passes through to the iframe. Reserved inline space and narrow-screen rules prevent control overlap. No new messaging or timing paths.
 
 1.11.2 shares host toolbar styles between content scripts and the worker. The embedded immersive extension frame requests an idempotent host-only style sync on startup, scoped to its sender tab and exact iframe URL. This repairs mixed-version hosts after reload without replacing the player or subtitle iframe. No collection or transcript data is sent.
+
+1.11.3 extends immersive height to 10–80vh (96px minimum). Handle and thin boundary share pointer capture with relative movement, preventing initial jumps. The iframe ignores hit testing only while dragging; pointerup/cancel/lost capture clears the state and persists the ratio. Double-click or Home restores 30vh.
