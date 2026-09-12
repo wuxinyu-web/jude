@@ -69,6 +69,30 @@ function attachClient(rootSession,sessionId){
     assert.deepEqual(await panel.evaluate(()=>[...document.querySelectorAll('.tab')].map(e=>e.textContent.trim())),['字幕','概览','收藏库','学习']);
     if(bili){assert.equal(await worker.evaluate(()=>__nativeCalls.length),4);assert.ok(await worker.evaluate(()=>__nativeCalls.some(u=>u.includes('cid=20'))));}
 
+    if(process.env.YTD_TEST_IMMERSIVE==='1'){
+      const setTime=t=>worker.evaluate(async t=>{const [tab]=await chrome.tabs.query({active:true,lastFocusedWindow:true});await chrome.scripting.executeScript({target:{tabId:tab.id},args:[t],func:t=>Object.defineProperty(document.querySelector('video'),'currentTime',{configurable:true,get:()=>t})});},t);await setTime(2);
+      await panel.evaluate(()=>{const s=document.getElementById('learningLayout');s.value='immersive';s.dispatchEvent(new Event('change'));});
+      let frame;await until(async()=>{frame=video.frames().find(f=>f.url().includes('immersive=1'));return frame&&await frame.locator('.immersive-word').count()>0;},'immersive captions',20000);
+      assert.equal(await frame.locator('.header').isVisible(),false);
+      assert.ok((await frame.locator('#immersiveCue').innerText()).includes('Consistency'));
+      assert.equal(await frame.locator('.transcript-entry').first().isVisible(),false);
+      const geometry=await video.evaluate(()=>({p:document.querySelector('#movie_player').getBoundingClientRect().toJSON(),d:document.querySelector('#ytd-layout-dock').getBoundingClientRect().toJSON()}));
+      assert.ok(geometry.p.height>600,'video keeps most of viewport');assert.ok(Math.abs(geometry.p.bottom-geometry.d.top)<2);
+      await frame.locator('.immersive-word').first().click();await until(async()=>(await frame.locator('.learning-float').innerText()).includes('持续性'),'tap lookup');
+      await frame.locator('.learning-float button').filter({hasText:'关闭'}).click();await frame.getByRole('button',{name:'回到当前正在播放的台词',exact:true}).click();
+      const word=frame.locator('.immersive-word').first(),box=await word.boundingBox();await video.mouse.move(box.x+box.width/2,box.y+box.height/2);await video.mouse.down();await sleep(700);await video.mouse.up();
+      await until(()=>worker.evaluate(async()=>((await chrome.storage.local.get('ytd_vocabulary')).ytd_vocabulary||[]).length===1),'long press saves word');
+      assert.equal(await frame.locator('.learning-float').count(),0,'long press does not also open click popup');
+      await frame.getByRole('button',{name:'收藏整句（也可以长按台词空白处）',exact:true}).click();await until(()=>worker.evaluate(async()=>((await chrome.storage.local.get('ytd_sentences')).ytd_sentences||[]).length===1),'save whole cue');
+      await setTime(22);await frame.getByRole('button',{name:'回到当前正在播放的台词',exact:true}).click();await until(async()=>(await frame.locator('#immersiveCue').innerText()).includes('The book'),'next cue follows media time');
+      await setTime(18);await until(async()=>(await frame.locator('#immersiveCue').innerText())==='…','gaps do not show stale cue');await setTime(22);
+      await until(async()=>(await frame.locator('#immersiveCue').innerText()).includes('The book'),'seek follows cue');
+      await video.getByRole('button',{name:'全屏',exact:true}).click();await until(()=>video.evaluate(()=>document.fullscreenElement===document.documentElement),'whole workspace fullscreen');
+      assert.equal(await frame.locator('#immersiveCue').isVisible(),true);await video.screenshot({path:path.join(out,'immersive-fullscreen.png')});await video.getByRole('button',{name:'全屏',exact:true}).click();
+      await frame.getByRole('button',{name:'打开收藏库',exact:true}).click();await until(async()=>{frame=video.frames().find(f=>f.url().includes('embedded=1')&&!f.url().includes('immersive=1'));return frame&&await frame.locator('[data-panel=library]').evaluate(e=>e.classList.contains('active'));},'full library restored');
+      fs.writeFileSync(path.join(out,'result.json'),JSON.stringify({passed:true,checks:['minimal-ui','video-space','tap-lookup','long-press-save','sentence-save','cue-follow','gap','seek','fullscreen-with-subtitles','library-return']},null,2));panel=null;console.log('PASS: immersive captions, gestures, fullscreen and library return');return;
+    }
+
     if(process.env.YTD_TEST_STUDY==='1') {
       await worker.evaluate(async fixtureId=>{await chrome.storage.local.set({ytd_vocabulary:[buildVocabularyEntry({term:'Consistency',videoId:fixtureId,videoTitle:'Practice',timestamp:0},{meaningZh:'持续性',explanationZh:'强调持续练习。',phonetic:'/kənˈsɪstənsi/'},Date.now(),'w1')],ytd_sentences:[{id:'s1',term:'The book which she recommended changed my perspective.',videoId:fixtureId,videoTitle:'Practice',translationZh:'她推荐的书改变了我的看法。',mainClause:'The book changed my perspective.',breakdown:'which 引导定语从句',createdAt:Date.now(),timestampSeconds:22,analysisStatus:'ready',grammarTags:['定语从句'],expressionTags:['普通表达']}]});},fixtureId);
       await panel.evaluate(async()=>{await YTD_PANEL.refreshVocabulary();await YTD_LEARNING_UI.refreshLibrary();});

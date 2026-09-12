@@ -56,3 +56,8 @@ Applying ASR validates the current video, increments digest/translation/analysis
 ## 1.7.0 上下布局
 
 layout-worker 管理布局偏好和原生侧栏开关；layout-content 用可撤销样式定位原站播放器并创建底部跨域 iframe，支持拖动及键盘调整高度；layout-ui 让侧栏与设置页共享选择。只公开 sidepanel.html 给两个站点，其他资源由扩展页自身加载。上下学习区绑定宿主标签，不跟随其他视频标签切换。进入网页全屏时原播放器仍使用原站能力。
+
+
+## 沉浸模式（1.9.0）
+
+`lib/immersive.js` consumes the existing sidepanel `ytdPlayback` event and raw timestamped segments. It adds no playback polling or study accumulator. `layout-content.js` retains the original player DOM and embeds the extension caption UI below it; document fullscreen includes both. Lookup and collection delegate to learning-ui / existing worker endpoints. Layout preferences retain independent vertical and immersive heights. Pure cue selection/token tests and isolated browser tests cover gestures, seeking, gaps, fullscreen and return to Library.

@@ -3583,6 +3583,7 @@ async function playbackTrackingTick({ returnToPosition = false } = {}) {
     const currentTime = result.response.currentTime;
     if (!Number.isFinite(currentTime) || currentTime < 0) return false;
     if (returnToPosition) autoScrollEnabled = true;
+    document.dispatchEvent(new CustomEvent("ytdPlayback",{detail:{currentTime,videoId:currentVideoId,generation:digestGeneration}}));
     highlightActiveEntry(currentTime);
     if (returnToPosition) {
       document.getElementById("followPlaybackBtn").style.display = "none";
@@ -4280,6 +4281,12 @@ globalThis.YTD_PANEL = {
   context: () => ({ videoId: currentVideoId, videoTitle: currentVideoTitle,
     channelName: currentChannelName, tabId: youtubeTabId, generation: digestGeneration,
     segments: getActiveTranscriptSegments(), libraryView: currentLibraryView, source:currentTranscriptSource, language:currentTranscriptLanguage, hasNativeBackup:Boolean(currentNativeTranscriptBackup) }),
+  rawSegments:()=>currentTranscript||[],
+  captionTranslation:segment=>{
+    if(currentNativeTranscriptBackup && /^(ai-)?zh/i.test(currentNativeTranscriptBackup.language||""))return YTD_ASR_CORE.alignChinese(segment,currentNativeTranscriptBackup.transcript);
+    const group=getActiveTranscriptSegments().find(g=>g.start<=segment.start&&g.start+g.duration>segment.start);
+    return group?transcriptParagraphCache.get(transcriptTranslationCacheKey(group))||"":"";
+  },
   applyASR: applyOriginalAudioTranscript, restoreNativeTranscript,
   vocabulary: () => vocabularyEntries,
   refreshVocabulary: refreshVocabularyEntries,

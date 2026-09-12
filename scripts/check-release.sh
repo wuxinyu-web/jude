@@ -52,6 +52,7 @@ public_allowlist=(
   "lib/layout-worker.js"
   "lib/layout-content.js"
   "lib/layout-ui.js"
+  "lib/immersive.js"
   "lib/local-asr.js"
   "lib/platform.js"
   "lib/wbi.js"

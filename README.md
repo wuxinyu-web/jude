@@ -1,3 +1,9 @@
+## 1.9.0: Immersive captions
+
+Choose 沉浸模式 in Layout for a large player and a compact, synchronized caption strip. Click a word for lookup, hold for 600 ms to save it, or click ☆ to save the sentence. Moving more than 8 px cancels a hold. Interactions keep the current cue visible; 跟上播放 resumes synchronization. Fullscreen includes both the player and captions; Escape exits. Resize the separator or return to 完整字幕 / 收藏库 at any time.
+
+This reuses the existing transcript, lookup, collection and study services. The Chinese toggle only shows prepared translations; no new provider request occurs merely by entering this mode. Timing accuracy follows the source timestamps.
+
 1.8.0 adds practice-based study goals, mutually exclusive timing, explicit continuation, summaries and local record management.
 
 > 1.7.0：新增「布局」选择，支持左右侧栏或上下学习区。上下布局保持视频在上，学习区在下，拖动分隔线可调整高度；布局和高度保存在本机，关闭学习区恢复原网页。

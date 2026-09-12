@@ -26,3 +26,8 @@ Only sidepanel.html is web-accessible, restricted to the two supported video ori
 ## Study v2
 
 Session practice validates the current foreground video and bound tab. Content-script pulses cannot invoke record export or clearing. Accounting mutations share one serialized queue; duplicate sample timestamps add no credit. New document IDs and worker boots require manual continuation. Export omits internal runtime identifiers and credentials. Clear requests affect only ytd_study and UI requires confirmation. Legacy migration never infers practice from collection IDs.
+
+
+## 沉浸模式（1.9.0）
+
+沉浸模式使用本地扩展文档；所有字幕、状态和服务返回文本使用 textContent / 文本节点呈现。收藏仍经过现有扩展页面消息校验和容量限制。全屏由用户手势触发，退出学习区撤销本扩展的样式和事件监听。

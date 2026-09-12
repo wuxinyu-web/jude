@@ -60,3 +60,17 @@ body:has(.tab.active[data-tab="study"]) #localAsrPanel{display:none!important}
 #studyPanel .study-task::before{content:"";position:absolute;top:-24px;left:0;right:0;height:24px;background:inherit}
 
 .study-day span:last-child{white-space:nowrap;font-size:10px}
+
+/* A quiet subtitle strip: all study/library tools remain one action away. */
+html.immersive,html.immersive body{background:#121313!important;color:#f4f1e9;height:100%;overflow:hidden}
+html.immersive body>.header,html.immersive #contentArea,html.immersive #followPlaybackBtn{display:none!important}
+.immersive-stage{height:100%;display:flex;flex-direction:column;box-sizing:border-box;padding:4px clamp(12px,4vw,64px) 6px;min-height:0}
+.immersive-toolbar{display:flex;align-items:center;justify-content:flex-end;gap:9px;min-height:28px;flex:none;color:#a4aaa3;font-size:11px}
+.immersive-toolbar button{background:transparent;border:0;color:#b8c0b6;font:inherit;cursor:pointer;padding:4px 6px;border-radius:4px}.immersive-toolbar button:hover,.immersive-toolbar button[aria-pressed=true]{background:#2e3730;color:#fff}.immersive-time{margin-right:auto;font-variant-numeric:tabular-nums}
+.immersive-caption{flex:1;min-height:0;overflow:auto;align-content:center;text-align:center;scrollbar-width:thin;scrollbar-color:#465046 transparent}
+.immersive-cue{font-size:clamp(19px,2.1vw,30px);font-weight:450;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;padding:7px 6px;transition:opacity .12s}
+.immersive-word{appearance:none;display:inline;background:none;color:inherit;border:0;border-radius:3px;padding:0;font:inherit;line-height:inherit;cursor:pointer;touch-action:pan-y;user-select:none}.immersive-word:hover{background:#344538;color:#e1f0d7}.immersive-word:focus-visible,.immersive-toolbar button:focus-visible{outline:2px solid #b2ca9c;outline-offset:3px}
+.immersive-translation{font-size:clamp(12px,1.2vw,16px);color:#aeb6aa;line-height:1.6;margin:3px 0 9px}.immersive-status{font-size:11px;color:#c3d3b7;line-height:1.3;margin:0;min-height:15px;text-align:center}
+html.immersive .learning-float{max-height:calc(100vh - 16px);background:#202622;color:#f2f2ea;border-color:#55654e}.immersive-stage .learning-muted{color:#bec6b8}
+@media(max-width:420px){.immersive-stage{padding-inline:8px}.immersive-toolbar{gap:2px;font-size:10px}.immersive-cue{font-size:19px}}
+@media(prefers-reduced-motion:reduce){.immersive-cue{transition:none}}
