@@ -59,6 +59,7 @@ function attachClient(rootSession,sessionId){
     const video=await context.newPage();
     for(const p of context.pages())if(p.url().includes('options.html'))await p.close();
     await video.goto(bili?'https://www.bilibili.com/video/BV1xx411c7mD/?p=2':'https://www.youtube.com/watch?v=abcDEF12345');
+    if(process.env.YTD_TEST_SEGMENTS==='1')await worker.evaluate(async()=>{const [tab]=await chrome.tabs.query({active:true,lastFocusedWindow:true});await chrome.scripting.executeScript({target:{tabId:tab.id},func:()=>{Object.defineProperty(document.querySelector('video'),'duration',{get:()=>29344,configurable:true});Object.defineProperty(document.querySelector('video'),'currentTime',{get:()=>14500,configurable:true});}});});
     await video.locator('#ytd-digest-button').click({timeout:12000});
     const cdp=await context.newCDPSession(video);let target;
     await until(async()=>{target=(await cdp.send('Target.getTargets')).targetInfos.find(t=>t.url===`chrome-extension://${extensionId}/sidepanel.html`);return !!target;},'side panel target');
@@ -216,12 +217,31 @@ function attachClient(rootSession,sessionId){
         res.setHeader('Content-Type','application/json');res.setHeader('Access-Control-Allow-Origin',`chrome-extension://${extensionId}`);res.setHeader('Access-Control-Allow-Headers','Content-Type, X-Study-Extension');res.setHeader('Access-Control-Allow-Methods','GET, POST, DELETE');
         if(req.method==='OPTIONS'){res.writeHead(204);res.end();return;}
         assert.equal(req.headers['x-study-extension'],extensionId);
+        if(req.url==='/health'){res.end(JSON.stringify({ready:true,capabilities:['segments-v1']}));return;}
         let body='';req.on('data',chunk=>body+=chunk);req.on('end',()=>{
           if(req.method==='POST'){starts++;cancelled=false;assert.equal(JSON.parse(body).videoId,fixtureId);if((process.env.YTD_TEST_AUTO_ASR==='1'||noCaptions)&&starts===1){res.writeHead(503);res.end(JSON.stringify({error:'测试：本地转写服务暂不可用'}));return;}}
+          if(process.env.YTD_TEST_SEGMENTS==='1'&&req.method==='POST'){result.range=JSON.parse(body).range;assert.ok(result.range);result.transcript=[{text:'English in this learning segment.',start:result.range.start+2,duration:3},{text:'Another sentence to collect.',start:result.range.start+8,duration:3}];complete=true;}
           if(req.method==='DELETE')cancelled=true;
-          res.end(JSON.stringify({id:'a'.repeat(32),videoId:fixtureId,status:cancelled?'cancelled':complete?'completed':'transcribing',message:cancelled?'已取消':complete?'转写完成':'正在转写英文原声',progress:complete?100:30,...(complete?{result}:partialCount?{result:{...result,partial:true,revision:partialCount,transcript:result.transcript.slice(0,partialCount)}}:{})}));
+          res.end(JSON.stringify({id:'a'.repeat(32),videoId:fixtureId,status:cancelled?'cancelled':complete?'completed':'transcribing',message:cancelled?'已取消':complete?'转写完成':'正在转写英文原声',progress:complete?100:30,...(result.range?{range:result.range}:{}),...(complete?{result}:partialCount?{result:{...result,partial:true,revision:partialCount,transcript:result.transcript.slice(0,partialCount)}}:{})}));
         });
       });await new Promise((resolve,reject)=>{asrServer.once('error',reject);asrServer.listen(Number(process.env.YTD_TEST_ASR_PORT)||8766,'127.0.0.1',resolve);});
+      if(process.env.YTD_TEST_SEGMENTS==='1'){
+        await panel.click('#enterImmersive');let frame;
+        await until(async()=>{frame=video.frames().find(f=>f.url().includes('immersive=1'));return frame&&await frame.locator('.asr-chunks option').count()===25;},'long video has 25 chunks');
+        await until(()=>frame.evaluate(()=>YTD_PANEL.context().source==='local-asr'),'first chunk applied');
+        assert.equal(await frame.locator('.asr-chunks select').inputValue(),'12');
+        assert.equal(await frame.evaluate(()=>YTD_PANEL.rawSegments()[0].start),14402);
+        await frame.getByRole('button',{name:'下一段',exact:true}).click();await frame.locator('#localAsrStart').click();
+        await until(()=>frame.evaluate(()=>YTD_PANEL.rawSegments().length===4),'second chunk merged');
+        assert.deepEqual(await frame.evaluate(()=>YTD_PANEL.rawSegments().map(s=>s.start)),[14402,14408,15602,15608]);
+        assert.equal(await frame.evaluate(async()=>(await chrome.runtime.sendMessage({action:'relayToContent',payload:{action:'getCurrentTime'}})).response.currentTime),14500,'selecting a chunk never seeks playback');
+        await frame.getByRole('button',{name:'上一段',exact:true}).click();await frame.locator('#localAsrStart').click();
+        await until(()=>starts===3,'repeat chunk request');assert.equal(await frame.evaluate(()=>YTD_PANEL.rawSegments().length),4);
+        await video.screenshot({path:path.join(out,'segment-picker.png')});
+        await frame.goto(frame.url());await until(()=>frame.evaluate(()=>YTD_PANEL.rawSegments().length===4),'merged chunks survive refresh');
+        assert.equal(await frame.locator('.asr-chunks').isVisible(),true,'picker remains visible with English captions');
+        fs.writeFileSync(path.join(out,'result.json'),JSON.stringify({passed:true,checks:['25-chunks','current-playback-chunk','absolute-timestamps','merge','retry-dedup','no-seek','refresh','picker-remains-visible']}));panel=null;console.log('PASS: long video chunks and merged subtitles');return;
+      }
       if(noCaptions){
         result.transcript[1].start=6780;
         await panel.click('#enterImmersive');let frame;

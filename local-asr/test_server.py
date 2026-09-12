@@ -65,6 +65,22 @@ class ServiceTest(unittest.TestCase):
         self.jobs.cancel(job_id)
         self.assertEqual(self.jobs.get(job_id)['result'],partial)
 
+    def test_segment_ranges_rejected_before_process_start(self):
+        for r in [dict(start=-1,end=20),dict(start=0,end=1201),dict(start=True,end=30),dict(start=90000,end=90030),dict(start=1,end=float('nan'))]:
+            self.assertEqual(self.request('POST','/jobs',json.dumps({'videoId':'BV1bfLwz1Eu4','range':r}),self.auth())[0],400)
+
+    def test_completed_segment_reused_but_another_range_not_mixed(self):
+        job_id='c'*32;folder=Path(self.temp.name)/job_id;folder.mkdir()
+        r=dict(start=14400,end=15600)
+        write_json(folder/'status.json',dict(id=job_id,videoId='BV1bfLwz1Eu4',range=r,status='completed'))
+        write_json(folder/'result.json',{'range':r,'transcript':[]})
+        self.assertEqual(self.jobs.start('BV1bfLwz1Eu4',r)['id'],job_id)
+        from unittest.mock import Mock
+        proc=Mock();proc.poll.return_value=None;self.jobs.processes[job_id]=proc
+        self.assertEqual(self.jobs.start('BV1bfLwz1Eu4',r)['id'],job_id)
+        with self.assertRaisesRegex(ValueError,'正在转写'):
+            self.jobs.start('BV1bfLwz1Eu4',dict(start=15600,end=16800))
+
     def test_cancel_is_idempotent_for_completed_job(self):
         job_id='f'*32;folder=Path(self.temp.name)/job_id;folder.mkdir();write_json(folder/'status.json',dict(id=job_id,videoId='BV1bfLwz1Eu4',status='completed'))
         self.assertEqual(self.jobs.cancel(job_id)['status'],'completed')

@@ -3679,6 +3679,7 @@ function highlightActiveEntry(currentSeconds) {
     }
   });
 
+  if(currentTranscriptSource==='local-asr'&&!currentTranscript?.some(s=>currentSeconds>=s.start&&currentSeconds<s.start+s.duration)){entries.forEach(e=>e.classList.remove('active-playback'));return;}
   if(currentTranscriptPartial && currentTranscript?.length){const last=currentTranscript[currentTranscript.length-1];if(currentSeconds>=last.start+last.duration){entries.forEach(e=>e.classList.remove('active-playback'));return;}}
   if (!activeEntry) return;
 
@@ -4344,6 +4345,7 @@ async function applyOriginalAudioTranscript(input) {
   const result=YTD_ASR_CORE.validateResult(input,currentVideoId);
   const snapshot={generation:digestGeneration,videoId:currentVideoId};
   if(!isCurrentDigestRequest(snapshot))return;
+  if(result.range&&currentTranscriptSource==='local-asr')return applyOriginalAudioProgress(result);
   if(currentTranscriptSource!=="local-asr" && currentTranscript?.length)currentNativeTranscriptBackup={transcript:currentTranscript,language:currentTranscriptLanguage,source:currentTranscriptSource};
   await replaceTranscriptSource(result,snapshot);
 }
@@ -4351,10 +4353,10 @@ async function applyOriginalAudioProgress(input){
   const result=YTD_ASR_CORE.validateResult(input,currentVideoId);
   if(currentTranscriptSource!=='local-asr')return applyOriginalAudioTranscript(result);
   // A re-transcription must not replace a previously complete transcript with a fragment.
-  if(!currentTranscriptPartial && result.partial)return;
-  if(result.partial&&currentTranscript?.length&&result.transcript.length<currentTranscript.length)return;
+  if(!result.range && !currentTranscriptPartial && result.partial)return;
+  if(!result.range&&result.partial&&currentTranscript?.length&&result.transcript.length<currentTranscript.length)return;
   const snapshot={generation:digestGeneration,videoId:currentVideoId},area=document.getElementById('contentArea'),top=area.scrollTop,mode=currentTranscriptMode;
-  currentTranscript=result.transcript;currentTranscriptPartial=Boolean(result.partial);
+  currentTranscript=result.range?YTD_ASR_CORE.mergeSegment(currentTranscript||[],result):result.transcript;currentTranscriptPartial=Boolean(result.partial);
   currentTranscriptText=currentTranscript.map(s=>s.text).join(' ');
   currentTranscriptTimestamped=currentTranscript.map(s=>`[${Math.floor(s.start/60)}:${String(Math.floor(s.start%60)).padStart(2,'0')}] ${s.text}`).join('\n');
   // Reuse the renderer and preserve the reading position; never seek or pause the player.

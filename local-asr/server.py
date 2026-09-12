@@ -1,6 +1,7 @@
 """Loopback-only original-audio transcription service. No cloud audio upload."""
 import argparse
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -17,6 +18,16 @@ VIDEO = re.compile(r'BV[0-9A-Za-z]{10}(?:_p[1-9][0-9]{0,3})?\Z')
 JOB = re.compile(r'[0-9a-f]{32}\Z')
 TERMINAL = {'completed', 'failed', 'cancelled'}
 MAX_BODY = 4096
+
+def validate_range(value):
+    if value is None:
+        return None
+    if not isinstance(value, dict) or set(value) != {'start', 'end'}:
+        raise ValueError('片段必须包含起止秒数。')
+    a, b = value['start'], value['end']
+    if any(isinstance(x, bool) or not isinstance(x, (int, float)) or not math.isfinite(x) for x in (a,b)) or not 0 <= a < b <= 86400 or b-a > 1200:
+        raise ValueError('每个学习片段最多 20 分钟，视频时间须在 24 小时以内。')
+    return dict(start=a, end=b)
 
 def read_json(path):
     try:
@@ -46,20 +57,28 @@ class Jobs:
                 data.update(status='failed', message='本地服务已重启，请重新转写。')
                 write_json(path, data)
 
-    def start(self, video_id):
+    def start(self, video_id, segment=None):
+        segment = validate_range(segment)
         if not isinstance(video_id, str) or not VIDEO.fullmatch(video_id):
             raise ValueError('仅支持有效的 B 站 BV 视频和分 P。')
         with self.lock:
             for job_id, proc in self.processes.items():
                 if proc.poll() is None:
                     status = self.get(job_id)
-                    if status['videoId'] == video_id:
+                    if status['videoId'] == video_id and status.get('range') == segment:
                         return status
                     raise ValueError('已有视频正在转写，请等待完成或先取消。')
+            if segment:
+                for path in sorted(self.root.glob('*/status.json'), key=lambda p:p.stat().st_mtime, reverse=True):
+                    old = read_json(path)
+                    if old and old.get('videoId') == video_id and old.get('range') == segment and old.get('status') == 'completed' and (path.parent/'result.json').is_file():
+                        return self.get(path.parent.name)
             job_id = uuid.uuid4().hex
             folder = self.root / job_id
             folder.mkdir()
             status = dict(id=job_id, videoId=video_id, status='queued', message='准备读取视频原声', progress=0, createdAt=time.time())
+            if segment:
+                status['range'] = segment
             write_json(folder / 'status.json', status)
             log = (folder / 'worker.log').open('wb')
             try:
@@ -147,7 +166,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(403, {'error':'只允许配置中的学习扩展访问。'})
         try:
             if self.path == '/health':
-                return self.reply(200, {'ready':True,'engine':'Whisper 本地英文转写','modelReady':Path(self.server.jobs.model).is_dir()})
+                return self.reply(200, {'ready':True,'engine':'Whisper 本地英文转写','modelReady':Path(self.server.jobs.model).is_dir(),'capabilities':['segments-v1']})
             if self.path.startswith('/jobs/'):
                 return self.reply(200, self.server.jobs.get(self.path[6:]))
             self.reply(404, {'error':'接口不存在。'})
@@ -161,9 +180,9 @@ class Handler(BaseHTTPRequestHandler):
             if self.path != '/jobs' or not 0 < size <= MAX_BODY:
                 raise ValueError('请求无效或过大。')
             data = json.loads(self.rfile.read(size))
-            if not isinstance(data, dict) or set(data) != {'videoId'}:
-                raise ValueError('请求只能包含视频编号。')
-            self.reply(202, self.server.jobs.start(data['videoId']))
+            if not isinstance(data, dict) or 'videoId' not in data or not set(data) <= {'videoId','range'}:
+                raise ValueError('请求只能包含视频编号和学习片段。')
+            self.reply(202, self.server.jobs.start(data['videoId'], data.get('range')))
         except (ValueError, TypeError) as e:
             self.reply(400, {'error':str(e)})
     def do_DELETE(self):

@@ -40,7 +40,10 @@ def main():
         if not VIDEO.fullmatch(video_id):
             raise ValueError('无效视频编号。')
         update('downloading', '正在读取当前视频的英文原声（不会上传音频）', 0)
-        info, audio_path = download_audio(folder, video_id, update)
+        segment = status.get('range')
+        info, audio_path = download_audio(folder, video_id, update, segment=segment)
+        base = segment['start'] if segment else 0
+        segment_meta = {'range':{'start':base,'end':min(segment['end'],info['duration'])}} if segment else {}
         update('decoding', '正在解码原声', 16)
         decoded = subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), '-nostdin','-v','error','-i',str(audio_path),
             '-t',str(MAX_SECONDS+1),'-f','f32le','-ac','1','-ar','16000','pipe:1'], capture_output=True, check=True, timeout=360)
@@ -71,11 +74,11 @@ def main():
                     continue
                 start = max(0, min(start, duration));finish=max(start,min(finish,duration))
                 if finish > start:
-                    segments.append({'text':text,'start':start,'duration':finish-start})
+                    segments.append({'text':text,'start':base+start,'duration':finish-start})
             segments.sort(key=lambda item:item['start'])
             if segments:
                 partial = {'videoId':video_id,'transcript':list(segments),'language':'en','source':'local-asr',
-                    'partial':True,'revision':offset//chunk_seconds+1,'processedUntil':min(duration,offset+chunk_seconds)}
+                    'partial':True,'revision':offset//chunk_seconds+1,'processedUntil':base+min(duration,offset+chunk_seconds),**segment_meta}
                 write_json(folder/'result.json',partial)
                 # Existing running server versions already return status.json;
                 # including the snapshot keeps progressive delivery compatible.
@@ -86,7 +89,7 @@ def main():
         if not segments:
             raise ValueError('未识别到可用英文语音；原字幕未被替换。')
         result = {'videoId':video_id,'transcript':segments,'language':'en','source':'local-asr',
-            'engine':'Whisper small.en','duration':duration,'createdAt':time.time(),
+            **segment_meta,'engine':'Whisper small.en','duration':duration,'createdAt':time.time(),
             'videoTitle':str(info.get('title','')),'notice':'英文原声自动转写，可能有识别误差，请结合音频核对。'}
         status.pop('result',None)
         write_json(folder/'result.json',result)

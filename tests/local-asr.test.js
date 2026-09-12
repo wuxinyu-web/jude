@@ -30,3 +30,17 @@ test('sentence Chinese does not repeat a broad native paragraph under shorter En
  assert.equal(C.alignChineseSentence({start:4,duration:5},broad),'');
  assert.equal(C.alignChineseSentence({start:0,duration:4},[{start:0,duration:4,text:'这一句对应的中文'}]),'这一句对应的中文');
 });
+
+test('long videos split into twenty minute study ranges including the last short range',()=>{
+ const ranges=C.segmentsForDuration(29344.971);assert.equal(ranges.length,25);assert.deepEqual(ranges[12],{start:14400,end:15600});assert.equal(ranges.at(-1).end,29344.971);assert.deepEqual(C.segmentsForDuration(Infinity),[]);
+});
+test('segment ASR keeps absolute timestamps beyond three hours and rejects cross-range output',()=>{
+ const r={...result,range:{start:14400,end:15600},transcript:[{text:'Later.',start:14401,duration:3}]};assert.deepEqual(C.validateResult(r,id),r);
+ assert.throws(()=>C.validateResult({...r,transcript:[{text:'Wrong.',start:1200,duration:3}]},id));
+ assert.throws(()=>C.validateResult({...r,range:{start:0,end:29344}},id));
+});
+test('segment results merge without losing other ranges or duplicating retries',()=>{
+ const a={text:'First.',start:10,duration:2},b={text:'Second.',start:1210,duration:2};
+ const r={range:{start:1200,end:2400},transcript:[b]};assert.deepEqual(C.mergeSegment([a],r),[a,b]);assert.deepEqual(C.mergeSegment([a,b],r),[a,b]);
+ const partial={...r,partial:true,processedUntil:1205,transcript:[{text:'New.',start:1201,duration:2}]};assert.equal(C.mergeSegment([a,b],partial).length,3);
+});

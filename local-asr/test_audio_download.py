@@ -69,6 +69,23 @@ class AudioTest(unittest.TestCase):
         with self.assertRaisesRegex(TranscriptionError, '超过单次 3 小时'):
             self.run_download(dict(id=VID, duration=29344, formats=[fmt(NORMAL)]))
 
+    def test_long_video_allows_only_bounded_segment(self):
+        validate_media(dict(id=VID,duration=29344),VID,dict(start=14400,end=15600))
+        with self.assertRaises(TranscriptionError):
+            validate_media(dict(id=VID,duration=29344),VID,dict(start=30000,end=31200))
+
+    def test_segment_uses_input_seeking_and_bounded_decoding(self):
+        from audio_download import download_segment
+        with tempfile.TemporaryDirectory() as directory:
+            folder=Path(directory)
+            def run(command, **kw):
+                self.assertLess(command.index('-ss'),command.index('-i'))
+                self.assertEqual(command[command.index('-ss')+1],'14400')
+                self.assertEqual(command[command.index('-t')+1],'1200')
+                (folder/'audio.wav').write_bytes(b'a'*50)
+            with patch('subprocess.run',side_effect=run):
+                self.assertTrue(download_segment(folder,NORMAL,dict(start=14400,end=15600),29344).is_file())
+
     def test_size_limit_is_explained(self):
         with self.assertRaisesRegex(TranscriptionError, '300 MB'):
             self.run_download(dict(id=VID, duration=20, formats=[fmt(NORMAL, filesize=MAX_BYTES+1)]))
