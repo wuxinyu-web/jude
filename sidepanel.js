@@ -1315,6 +1315,8 @@ async function seekFromTranscriptEntryClick(event, seconds) {
     return;
   }
 
+  const clickedEntry = event.currentTarget;
+  if (clickedEntry?.matches?.(".transcript-entry")) scrollTranscriptEntry(clickedEntry, "instant");
   const snapshot = sentenceFollowSnapshot();
   const request = ++transcriptSeekRevision;
   const success = await seekTo(seconds);
@@ -1326,7 +1328,8 @@ async function seekFromTranscriptEntryClick(event, seconds) {
   if (button) button.style.display = "none";
   highlightActiveEntry(Number(seconds));
   // Reposition even if polling already highlighted this row while seeking.
-  scrollToActiveEntry("smooth");
+  if (clickedEntry?.isConnected) scrollTranscriptEntry(clickedEntry, "instant");
+  else scrollToActiveEntry("instant");
 }
 
 function getDisplayedTranscriptRowText(row) {
@@ -3670,11 +3673,16 @@ function scrollToActiveEntry(behavior = "smooth") {
   );
   if (!activeEntry) return false;
 
+  return scrollTranscriptEntry(activeEntry, behavior);
+}
+
+function scrollTranscriptEntry(activeEntry, behavior = "instant") {
   lastAutoScrollTime = Date.now();
   if (document.documentElement.classList.contains("immersive")) {
     const area = document.getElementById("contentArea");
-    const toolbar = document.querySelector("#transcriptSection .sticky-control-row") || document.querySelector(".sticky-control-row");
-    const top = area.scrollTop + activeEntry.getBoundingClientRect().top - area.getBoundingClientRect().top - (toolbar?.getBoundingClientRect().height || 0);
+    const toolbar = document.querySelector("#transcriptContent .sticky-control-row") || document.querySelector(".sticky-control-row");
+    const english = activeEntry.querySelector(".transcript-original, .transcript-text") || activeEntry;
+    const top = area.scrollTop + english.getBoundingClientRect().top - area.getBoundingClientRect().top - (toolbar?.getBoundingClientRect().height || 0) - 4;
     area.scrollTo({ top: Math.max(0, top), behavior });
   } else {
     activeEntry.scrollIntoView({ behavior, block: "center" });

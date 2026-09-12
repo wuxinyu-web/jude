@@ -108,3 +108,5 @@ The first English snapshot is buffered until 20 subtitle entries are available; 
 1.12.1 hides segment controls in immersion and restores the existing awaiting-English visibility rule for the ASR panel. Once English is available, the complete panel is hidden; range controls remain available in the sidebar. Processing and storage are unchanged.
 
 Sentence-save follow uses a video/generation/manual-scroll revision snapshot. Explicit wheel, touch and keyboard scrolling cancels pending recentering, including during player-position requests. Native selection temporarily suppresses automatic scrolling.
+
+Immersive row clicks position the clicked DOM row immediately, before the seek response. The English text rectangle is aligned beneath the measured sticky toolbar with a 4px inset; post-seek following retains generation and manual-scroll guards.

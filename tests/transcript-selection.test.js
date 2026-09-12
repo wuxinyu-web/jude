@@ -785,11 +785,35 @@ test('click-to-seek restores scrolling, but not after manual scroll, failed seek
     if(outcome==='scroll')h.sandbox.manualTranscriptScrollRevision++;
     if(outcome==='video')h.sandbox.currentVideoId='b';
     h.finish(outcome!=='failure');await task;
-    assert.deepEqual(h.calls,outcome==='success'?[125,'smooth']:[]);
+    assert.deepEqual(h.calls,outcome==='success'?[125,'instant']:[]);
     assert.equal(h.sandbox.autoScrollEnabled,outcome==='success');
   }
   const h=make();h.sandbox.hasNonCollapsedTextSelection=()=>true;
   let prevented=0;
   await h.sandbox.seekFromTranscriptEntryClick({preventDefault:()=>prevented++,stopPropagation:()=>prevented++},125);
   assert.equal(prevented,2);assert.deepEqual(h.calls,[]);
+});
+
+test('immersive positioning aligns English below toolbar, independent of preceding Chinese height', () => {
+  const fn=source.slice(source.indexOf('function scrollTranscriptEntry('),source.indexOf('\n/**\n * Finds the transcript entry matching'));
+  const calls=[];
+  const area={scrollTop:400,getBoundingClientRect:()=>({top:10}),scrollTo:o=>calls.push(o)};
+  const sandbox={Date,lastAutoScrollTime:0,document:{documentElement:{classList:{contains:()=>true}},getElementById:()=>area,querySelector:()=>({getBoundingClientRect:()=>({height:40})})}};
+  vm.runInNewContext(fn,sandbox);
+  sandbox.scrollTranscriptEntry({querySelector:()=>({getBoundingClientRect:()=>({top:214})})},'instant');
+  assert.equal(calls[0].top,560);
+  assert.equal(calls[0].behavior,'instant');
+});
+
+test('clicked row scrolls immediately before the player seek finishes', async () => {
+  const fn=source.slice(source.indexOf('async function seekFromTranscriptEntryClick('),source.indexOf('\nfunction getDisplayedTranscriptRowText'));
+  const row={matches:()=>true,isConnected:true};const calls=[];let finish;
+  const sandbox={hasNonCollapsedTextSelection:()=>false,sentenceFollowSnapshot:()=>({videoId:'a',generation:1,revision:0}),
+    currentVideoId:'a',digestGeneration:1,manualTranscriptScrollRevision:0,transcriptSeekRevision:0,autoScrollEnabled:false,
+    seekTo:()=>new Promise(r=>{finish=r;}),transcriptTabIsActive:()=>true,
+    document:{getElementById:()=>null},highlightActiveEntry:()=>{},scrollTranscriptEntry:(entry,behavior)=>calls.push([entry,behavior])};
+  vm.runInNewContext(fn,sandbox);
+  const promise=sandbox.seekFromTranscriptEntryClick({currentTarget:row},125);
+  assert.equal(calls.length,1);assert.equal(calls[0][0],row);assert.equal(calls[0][1],'instant');
+  finish(true);await promise;assert.equal(calls.length,2);assert.equal(sandbox.autoScrollEnabled,true);
 });
