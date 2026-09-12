@@ -1562,7 +1562,7 @@ function buildAudioTranscriptionConfirmation(durationSeconds) {
 
 function showMissingTranscriptError(message) {
   if (YTD_PLATFORM.biliParts(currentVideoId)) {
-    showError("没有可读取的字幕轨", "仍可直接识别英文音轨，生成英文字幕及中文翻译。支持 3 小时以内的公开视频，需本地转写服务运行。");
+    showError("没有可读取的字幕轨", "仍可直接识别英文音轨，生成英文字幕及中文翻译。长视频可按 20 分钟学习片段处理，需本地转写服务运行。");
     document.getElementById("errorBtn").textContent="从英文原声生成字幕";
     errorAction=async()=>{
       document.documentElement.setAttribute('data-awaiting-english','');
