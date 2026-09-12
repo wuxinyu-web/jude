@@ -23,3 +23,6 @@ dist/
 .env.*
 *.pem
 *.key
+
+# Local browser verification artifacts
+test-results/

@@ -1,7 +1,6 @@
 const form = document.getElementById("settingsForm");
 const aiApiKeyInput = document.getElementById("aiApiKey");
 const supadataApiKeyInput = document.getElementById("supadataApiKey");
-const tavilyApiKeyInput = document.getElementById("tavilyApiKey");
 const customizationPrompt = document.getElementById("customizationPrompt");
 const copyCustomizationPromptBtn = document.getElementById(
   "copyCustomizationPromptBtn",
@@ -30,7 +29,6 @@ async function loadSettings() {
 
   aiApiKeyInput.value = settings.aiApiKey;
   supadataApiKeyInput.value = settings.supadataApiKey;
-  tavilyApiKeyInput.value = settings.tavilyApiKey;
   if (migration.migrated) {
     await chrome.storage.local.set({
       [YTD_SETTINGS.STORAGE_KEY]: settings,
@@ -48,7 +46,6 @@ async function saveSettings(event) {
     const settings = YTD_SETTINGS.normalize({
       aiApiKey: aiApiKeyInput.value,
       supadataApiKey: supadataApiKeyInput.value,
-      tavilyApiKey: tavilyApiKeyInput.value,
     });
 
     if (!settings.supadataApiKey) {

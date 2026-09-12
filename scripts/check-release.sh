@@ -39,7 +39,7 @@ public_allowlist=(
   "icons/icon48.png"
   "icons/icon128.png"
   "prompts/analysis.md"
-  "prompts/ask.md"
+  "prompts/sentence.md"
   "prompts/explain.md"
   "prompts/note-cleanup.md"
   "prompts/translation.md"
@@ -49,6 +49,14 @@ public_allowlist=(
   "PRIVACY.md"
   "SECURITY.md"
   "LICENSE"
+  "lib/learning-core.js"
+  "lib/learning-worker.js"
+  "lib/learning-ui.js"
+  "lib/study-content.js"
+  "lib/word-export.js"
+  "lib/learning.css"
+  "vendor/docx.umd.js"
+  "vendor/docx.LICENSE"
 )
 
 required_public_files=(
@@ -164,11 +172,9 @@ for (const item of manifest.web_accessible_resources || []) {
 for (const file of releaseFiles) {
   if (file.endsWith(".js")) {
     const source = fs.readFileSync(file, "utf8");
-    for (const match of source.matchAll(
-      /\bimportScripts\s*\(\s*["']([^"']+)["']\s*\)/g,
-    )) {
-      if (!/^[a-z]+:/i.test(match[1])) {
-        referenced.add(path.posix.join(path.posix.dirname(file), match[1]));
+    for (const call of source.matchAll(/\bimportScripts\s*\(([^)]*)\)/g)) {
+      for (const match of call[1].matchAll(/["']([^"']+)["']/g)) {
+        if (!/^[a-z]+:/i.test(match[1])) referenced.add(path.posix.join(path.posix.dirname(file), match[1]));
       }
     }
     for (const match of source.matchAll(
@@ -229,7 +235,7 @@ for file in "${javascript_files[@]}"; do
 done
 
 if compgen -G "tests/*.test.js" >/dev/null; then
-  node --test tests/*.test.js
+  node --test tests/*.test.js >&2
 fi
 
 if ((${#javascript_files[@]} > 0)); then

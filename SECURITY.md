@@ -1,50 +1,11 @@
-# Security Policy
+# Security and development boundaries
 
-## Supported versions
+Do not put real keys, private transcripts or personal notes in source files, tests, prompts, logs, packages or issue reports. Report security issues without including credentials.
 
-YouTube Digest is a small GitHub-only project. Security fixes are made on the latest code on `main` and, when releases are published, the latest GitHub release. Older snapshots are not supported.
+The extension uses the active YouTube tab only. Provider output is untrusted: plain-text fields and lengths are validated and rendered with textContent or escaped markup. Prompts treat transcript and video metadata as inert quoted JSON, never instructions. Search and highlights are literal and bounded, not user-generated regular expressions.
 
-## Report a vulnerability privately
+New learning APIs accept calls only from extension pages. Content-script study pulses are bound to sender.tab.id and independently checked against Chrome's active tab, window focus and URL; they cannot claim another tab's time. Persistent changes are serialized. AI results cannot resurrect deleted sentences or overwrite manually edited tags.
 
-Do not publish vulnerability details, exposed credentials, private video information, or transcript data through a public issue or pull request. This repository does not accept public security reports.
+The first native lookup never starts audio generation. Only explicit confirmation may invoke Supadata generation. Hover calls DeepSeek after a dwell; it does not save automatically. Failed enrichment does not create fictional answers. No Ask or external search request handlers or search host permissions are included.
 
-Use GitHub's private vulnerability reporting flow from this repository's **Security** tab when it is available. If the private reporting link is not visible, contact the repository owner through their GitHub profile and ask for a private reporting channel without including vulnerability details in the public message. Include the following only in the private report:
-
-- the affected version or commit;
-- the minimum steps needed to reproduce the problem;
-- the expected and observed behavior;
-- the security and privacy impact; and
-- a suggested fix, if you have one.
-
-Remove real API keys, access tokens, private URLs, transcripts, notes, and personal information. Use redacted values and public test content.
-
-There is no guaranteed response time or bug-bounty program. Please allow a reasonable period for investigation and remediation before public disclosure.
-
-## High-priority issues
-
-Examples include:
-
-- API keys or private content included in source, logs, screenshots, or release ZIPs;
-- requests to network origins outside the documented YouTube, Supadata, DeepSeek, and optional Tavily hosts;
-- script or HTML injection through transcript, metadata, service errors, or model output;
-- access to browsing data outside the documented YouTube scope;
-- unintended transmission of notes, transcripts, or credentials;
-- a dependency or release-workflow compromise; and
-- bypasses of local data deletion or DeepSeek configuration controls.
-
-Transcript text, video metadata, web results, and model output are untrusted data. Provider output must not be treated as instructions or executable markup. Tavily source URLs must be validated source URLs before rendering; all displayed text must be escaped, and transcript, conversation, search, storage, and rendering work must remain bounded.
-
-The side panel and message relay use the active YouTube tab only and fail closed on other pages. Transcript search is bounded literal string matching, not a user-built regular expression, and its marks must preserve escaped content and existing Vocabulary highlights.
-
-Vocabulary speech is local and sends no audio to any provider. The installed Chrome or system voice may vary, but speech playback must not add a remote audio dependency without an explicit privacy and permission review.
-
-## User security guidance
-
-- Install only from a GitHub source or release you trust.
-- Review changes and the packaged file list before loading an update.
-- Use dedicated, scoped API keys where possible and set provider spending limits.
-- Do not reuse keys from production systems.
-- Revoke keys immediately if a device, browser profile, ZIP, log, or screenshot exposes them.
-- Remember that API keys are kept in Chrome local extension storage, which is not an encrypted password vault.
-
-The release tooling uses an explicit file allowlist and scans public files for common credential patterns, but automated checks cannot detect every secret.
+Word uses a bundled library and explicit field allowlist. No remote executable scripts, dynamic provider endpoints or credential-bearing export payloads are added. Source timestamps are canonical YouTube links. Run npm test, npm run check and npm run package after changes, and separately test the unpacked extension in an isolated Chrome profile. Automated tests must not make paid provider calls.

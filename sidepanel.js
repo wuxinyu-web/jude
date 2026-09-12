@@ -53,7 +53,7 @@ const TRANSLATION_MESSAGE_TIMEOUT_MS = 130_000;
 // --- Library / vocabulary state ---
 // Vocabulary is loaded globally because saved terms highlight every video,
 // while the Library filter only changes which cards are visible.
-let currentLibraryView = "notes";
+let currentLibraryView = "vocabulary";
 let showAllVocabulary = false;
 let vocabularyEntries = [];
 let vocabularyLoadGeneration = 0;
@@ -69,88 +69,6 @@ const TRANSCRIPT_SEARCH_LIMITS = Object.freeze({
   maxMatches: 1_000,
 });
 let transcriptSearchState = createTranscriptSearchState();
-
-// --- Ask state ---
-// Messages intentionally remain in memory. Only generated suggestions are
-// copied into the per-video digest cache.
-const ASK_QUESTION_MAX_LENGTH = 2_000;
-let askMessageSequence = 0;
-
-function createAskState(videoId = null) {
-  return {
-    messages: [],
-    suggestions: [],
-    loading: false,
-    webEnabled: false,
-    generation: 0,
-    videoId: videoId || null,
-    suggestionsLoading: false,
-    suggestionsRequested: false,
-    suggestionsError: "",
-    suggestionsContextReduced: false,
-    lastAnnouncementKey: "",
-    statusSequence: 0,
-  };
-}
-
-const askState = createAskState();
-
-function normalizeAskUiSuggestions(suggestions) {
-  if (!Array.isArray(suggestions)) return [];
-  const normalized = [];
-  const seen = new Set();
-  for (const suggestion of suggestions) {
-    const text = String(suggestion || "").trim().slice(0, 200);
-    const key = text.toLocaleLowerCase();
-    if (!text || seen.has(key)) continue;
-    seen.add(key);
-    normalized.push(text);
-    if (normalized.length === 3) break;
-  }
-  return normalized;
-}
-
-function resetAskStateForVideo(state, videoId, cachedSuggestions = []) {
-  const nextVideoId = videoId || null;
-  if (state.videoId === nextVideoId) {
-    if (!state.suggestions.length) {
-      state.suggestions = normalizeAskUiSuggestions(cachedSuggestions);
-      state.suggestionsRequested = state.suggestions.length > 0;
-    }
-    return state;
-  }
-
-  state.messages = [];
-  state.suggestions = normalizeAskUiSuggestions(cachedSuggestions);
-  state.loading = false;
-  state.webEnabled = false;
-  state.generation += 1;
-  state.videoId = nextVideoId;
-  state.suggestionsLoading = false;
-  state.suggestionsRequested = state.suggestions.length > 0;
-  state.suggestionsError = "";
-  state.suggestionsContextReduced = false;
-  state.lastAnnouncementKey = "";
-  state.statusSequence = 0;
-  return state;
-}
-
-function hydrateAskSuggestionsFromCache(state, cached) {
-  if (!cached || state.suggestions.length) return;
-  state.suggestions = normalizeAskUiSuggestions(cached.askSuggestions);
-  state.suggestionsRequested = state.suggestions.length > 0;
-  state.suggestionsContextReduced =
-    cached.askSuggestionsContextReduced === true;
-}
-
-function shouldLoadAskSuggestions(state) {
-  return Boolean(
-    state.videoId &&
-      !state.suggestions.length &&
-      !state.suggestionsLoading &&
-      !state.suggestionsRequested,
-  );
-}
 
 /**
  * Prevent a stopped service worker or dead message channel from leaving the
@@ -859,7 +777,6 @@ function setupEventListeners() {
       renderVocabularyForCurrentFilter();
     });
 
-  setupAskEventListeners();
 }
 
 function setNotesFilter(showAll) {
@@ -872,24 +789,19 @@ function setNotesFilter(showAll) {
 }
 
 function switchLibraryView(view) {
-  if (!["notes", "vocabulary"].includes(view)) return;
+  if (!["notes", "vocabulary", "sentences"].includes(view)) return;
   currentLibraryView = view;
-  const notesActive = view === "notes";
-  const notesButton = document.getElementById("libraryNotesTab");
-  const vocabularyButton = document.getElementById("libraryVocabularyTab");
-  const notesView = document.getElementById("libraryNotesView");
-  const vocabularyView = document.getElementById("libraryVocabularyView");
-
-  notesButton?.classList.toggle("active", notesActive);
-  notesButton?.setAttribute("aria-pressed", String(notesActive));
-  vocabularyButton?.classList.toggle("active", !notesActive);
-  vocabularyButton?.setAttribute("aria-pressed", String(!notesActive));
-  if (notesView) notesView.hidden = !notesActive;
-  if (vocabularyView) vocabularyView.hidden = notesActive;
-
-  if (!notesActive) {
-    renderVocabularyForCurrentFilter();
+  for (const key of ["notes", "vocabulary", "sentences"]) {
+    const name = key[0].toUpperCase() + key.slice(1);
+    const active = key === view;
+    const button = document.getElementById(`library${name}Tab`);
+    button?.classList.toggle("active", active);
+    button?.setAttribute("aria-pressed", String(active));
+    const pane = document.getElementById(`library${name}View`);
+    if (pane) pane.hidden = !active;
   }
+  if (view === "vocabulary") renderVocabularyForCurrentFilter();
+  if (view === "sentences") globalThis.YTD_LEARNING_UI?.refreshLibrary();
 }
 
 function setVocabularyFilter(showAll) {
@@ -1002,10 +914,6 @@ function extractVideoId(url) {
 async function startDigest(videoId, videoUrl) {
   resetTranscriptSearchForVideo(videoId);
 
-  if (videoId !== askState.videoId) {
-    resetAskStateForVideo(askState, videoId);
-    renderAskUi();
-  }
 
   // Check if we already have this video loaded in memory
   if (videoId === currentVideoId && currentAnalysis) {
@@ -1033,6 +941,7 @@ async function startDigest(videoId, videoUrl) {
   }
 
   currentVideoId = videoId;
+  globalThis.YTD_LEARNING_UI?.videoChanged();
   currentVideoUrl = videoUrl;
   currentAnalysis = null;
   currentTranscript = null;
@@ -1058,7 +967,6 @@ async function startDigest(videoId, videoUrl) {
     currentTranscriptTimestamped = cached.transcriptTimestamped;
     currentTranscriptLanguage = cached.transcriptLanguage || null;
     currentTranscriptSource = cached.transcriptSource || "native";
-    hydrateAskSuggestionsFromCache(askState, cached);
 
     // Restore semantic-segment translations from persistent storage.
     if (cached.paragraphCache) {
@@ -1095,7 +1003,6 @@ async function startDigest(videoId, videoUrl) {
     // Setup explain feature
     setupExplainFeature();
     if (currentTranscriptMode !== "original") translateTranscript();
-    renderAskUi();
     return;
   }
 
@@ -1177,7 +1084,6 @@ async function completeTranscriptLoad(videoId, transcriptResult, requestSnapshot
   // Setup explain feature for text selection
   setupExplainFeature();
   if (currentTranscriptMode !== "original") translateTranscript();
-  renderAskUi();
 
   // Save transcript to cache (without analysis)
   await saveToCache(videoId, requestSnapshot);
@@ -1583,12 +1489,7 @@ function showState(state) {
 
   if (state !== "results") {
     closeActiveExplanationModal?.();
-    document.getElementById("contentArea")?.classList.remove("ask-mode");
     stopPlaybackTracking();
-  } else if (
-    document.querySelector('.tab.active[data-tab="ask"]')
-  ) {
-    document.getElementById("contentArea")?.classList.add("ask-mode");
   }
 }
 
@@ -1698,10 +1599,6 @@ function switchTab(tabName) {
   if (transcriptTabIsActive() && tabName !== "transcript") {
     captureTranscriptViewPosition({ immediate: true });
   }
-  contentArea?.classList.toggle("ask-mode", tabName === "ask");
-  if (tabName === "ask") {
-    contentArea.scrollTop = 0;
-  }
 
   document.querySelectorAll(".tab").forEach((tab) => {
     tab.classList.toggle("active", tab.dataset.tab === tabName);
@@ -1727,15 +1624,12 @@ function switchTab(tabName) {
     triggerAnalysis();
   }
 
-  if (tabName === "ask") {
-    renderAskUi();
-    ensureAskSuggestions();
-  }
 
+  globalThis.YTD_LEARNING_UI?.tabChanged(tabName);
   if (tabName === "library") {
     if (currentLibraryView === "vocabulary") {
       renderVocabularyForCurrentFilter();
-    } else {
+    } else if (currentLibraryView === "notes") {
       const showAll = document
         .getElementById("notesFilterAll")
         ?.classList.contains("active");
@@ -1745,614 +1639,9 @@ function switchTab(tabName) {
 }
 
 // ============================================================
-// ASK
+// ANALYSIS
 // ============================================================
 
-function normalizeAskComposerQuestion(value) {
-  if (typeof value !== "string") {
-    throw new Error("Enter a question about this video.");
-  }
-  const question = value.trim();
-  if (!question) throw new Error("Enter a question about this video.");
-  if (question.length > ASK_QUESTION_MAX_LENGTH) {
-    throw new Error("Questions are limited to 2,000 characters.");
-  }
-  return question;
-}
-
-function nextAskMessageId() {
-  askMessageSequence += 1;
-  return `ask-${Date.now()}-${askMessageSequence}`;
-}
-
-function getCompletedAskHistory(messages) {
-  const history = [];
-  const source = Array.isArray(messages) ? messages : [];
-  for (let index = 0; index < source.length - 1; index += 1) {
-    const user = source[index];
-    const assistant = source[index + 1];
-    if (
-      user?.role === "user" &&
-      user.status === "complete" &&
-      assistant?.role === "assistant" &&
-      assistant.status === "complete"
-    ) {
-      history.push(
-        { role: "user", content: String(user.content || "") },
-        { role: "assistant", content: String(assistant.content || "") },
-      );
-      index += 1;
-    }
-  }
-  return history;
-}
-
-function buildAskRequestPayload({
-  question,
-  messages = [],
-  history,
-  webEnabled,
-  videoId,
-  transcriptText,
-  videoTitle,
-  channelName,
-  videoDescription,
-  videoDuration,
-  overview,
-}) {
-  const completedHistory = Array.isArray(history)
-    ? history.map((message) => ({
-        role: message.role,
-        content: String(message.content || ""),
-      }))
-    : getCompletedAskHistory(messages);
-  return {
-    action: "askVideo",
-    question: normalizeAskComposerQuestion(question),
-    history: completedHistory,
-    videoId: videoId || null,
-    transcriptText: String(transcriptText || ""),
-    videoTitle: String(videoTitle || ""),
-    channelName: String(channelName || ""),
-    videoDescription: String(videoDescription || ""),
-    videoDuration: Number(videoDuration) || 0,
-    overview: overview && typeof overview === "object" ? overview : null,
-    webEnabled: webEnabled === true,
-  };
-}
-
-function safeAskExternalUrl(value) {
-  try {
-    const parsed = new URL(String(value || ""));
-    if (!["http:", "https:"].includes(parsed.protocol)) return "";
-    if (parsed.username || parsed.password) return "";
-    return parsed.href;
-  } catch (_error) {
-    return "";
-  }
-}
-
-function normalizeAskAssistantResult(result) {
-  const sources = [];
-  if (Array.isArray(result?.sources)) {
-    for (const source of result.sources) {
-      const url = safeAskExternalUrl(source?.url);
-      if (!url) continue;
-      sources.push({
-        title: String(source?.title || "Source").trim().slice(0, 300) || "Source",
-        url,
-      });
-      if (sources.length === 5) break;
-    }
-  }
-  return {
-    answer:
-      String(result?.answer || "").trim().slice(0, 20_000) ||
-      "No answer was returned.",
-    sources,
-    contextReduced: result?.contextReduced === true,
-    webWarning: String(result?.webWarning || "").trim().slice(0, 1_000),
-  };
-}
-
-function isCurrentAskSnapshot(state, snapshot) {
-  return Boolean(
-    snapshot &&
-      state.videoId === snapshot.videoId &&
-      state.generation === snapshot.generation,
-  );
-}
-
-function beginAskRequest(state, question, { retryMessageId = null } = {}) {
-  if (state.loading) return null;
-  const normalizedQuestion = normalizeAskComposerQuestion(question);
-  if (!state.videoId) throw new Error("Open a YouTube video before asking.");
-  const history = getCompletedAskHistory(state.messages);
-
-  if (retryMessageId) {
-    const errorIndex = state.messages.findIndex(
-      (message) =>
-        message.id === retryMessageId && message.status === "error",
-    );
-    if (errorIndex < 0) throw new Error("This question can no longer be retried.");
-    state.messages.splice(errorIndex, 1);
-  } else {
-    state.messages.push({
-      id: nextAskMessageId(),
-      role: "user",
-      content: normalizedQuestion,
-      status: "complete",
-    });
-  }
-
-  state.loading = true;
-  state.statusSequence += 1;
-  return {
-    question: normalizedQuestion,
-    history,
-    webEnabled: state.webEnabled === true,
-    snapshot: {
-      videoId: state.videoId,
-      generation: state.generation,
-    },
-  };
-}
-
-function applyAskRequestResult(state, snapshot, result, question) {
-  if (!isCurrentAskSnapshot(state, snapshot)) return false;
-
-  if (result?.success === true) {
-    const answer = normalizeAskAssistantResult(result);
-    state.messages.push({
-      id: nextAskMessageId(),
-      role: "assistant",
-      content: answer.answer,
-      status: "complete",
-      sources: answer.sources,
-      contextReduced: answer.contextReduced,
-      webWarning: answer.webWarning,
-    });
-  } else {
-    state.messages.push({
-      id: nextAskMessageId(),
-      role: "assistant",
-      content: String(
-        result?.message || result?.error || "Could not answer this question.",
-      )
-        .trim()
-        .slice(0, 1_000),
-      status: "error",
-      retryQuestion: question,
-    });
-  }
-
-  state.loading = false;
-  return true;
-}
-
-function resolveAskChipAction(question, currentWebEnabled, enableWeb) {
-  return {
-    question: normalizeAskComposerQuestion(question),
-    webEnabled: enableWeb === true || currentWebEnabled === true,
-  };
-}
-
-function setupAskEventListeners() {
-  const form = document.getElementById("askForm");
-  const input = document.getElementById("askInput");
-  const webToggle = document.getElementById("askWebToggle");
-
-  form?.addEventListener("submit", (event) => {
-    event.preventDefault();
-    submitAskFromComposer();
-  });
-  input?.addEventListener("input", () => {
-    setAskComposerError("");
-    updateAskComposerUi();
-  });
-  input?.addEventListener("keydown", (event) => {
-    if (
-      event.key === "Enter" &&
-      !event.shiftKey &&
-      !event.isComposing
-    ) {
-      event.preventDefault();
-      submitAskFromComposer();
-    }
-  });
-  webToggle?.addEventListener("change", () => {
-    askState.webEnabled = webToggle.checked === true;
-  });
-
-  document.querySelectorAll("[data-ask-question]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const action = resolveAskChipAction(
-        button.dataset.askQuestion,
-        askState.webEnabled,
-        button.dataset.enableWeb === "true",
-      );
-      setAskWebEnabled(action.webEnabled);
-      submitAskQuestion(action.question);
-    });
-  });
-  updateAskComposerUi();
-}
-
-function setAskWebEnabled(enabled) {
-  askState.webEnabled = enabled === true;
-  const toggle = document.getElementById("askWebToggle");
-  if (toggle) toggle.checked = askState.webEnabled;
-}
-
-function setAskComposerError(message) {
-  const error = document.getElementById("askComposerError");
-  if (error) error.textContent = String(message || "");
-}
-
-function updateAskComposerUi() {
-  const input = document.getElementById("askInput");
-  const sendButton = document.getElementById("askSendBtn");
-  const characterCount = document.getElementById("askCharacterCount");
-  const webToggle = document.getElementById("askWebToggle");
-  const value = String(input?.value || "");
-  const canSend =
-    value.trim().length > 0 &&
-    value.length <= ASK_QUESTION_MAX_LENGTH &&
-    !askState.loading;
-
-  if (sendButton) sendButton.disabled = !canSend;
-  if (characterCount) {
-    characterCount.textContent = `${value.length} / ${ASK_QUESTION_MAX_LENGTH}`;
-  }
-  if (webToggle) {
-    webToggle.checked = askState.webEnabled;
-    webToggle.disabled = askState.loading;
-  }
-  document.querySelectorAll(".ask-chip").forEach((button) => {
-    button.disabled = askState.loading;
-  });
-}
-
-function submitAskFromComposer() {
-  const input = document.getElementById("askInput");
-  const question = String(input?.value || "");
-  if (!submitAskQuestion(question)) return;
-  if (input) input.value = "";
-  updateAskComposerUi();
-}
-
-function submitAskQuestion(question, options = {}) {
-  let request;
-  try {
-    request = beginAskRequest(askState, question, options);
-  } catch (error) {
-    setAskComposerError(error.message);
-    return false;
-  }
-  if (!request) return false;
-
-  setAskComposerError("");
-  renderAskConversation();
-  updateAskComposerUi();
-  void deliverAskRequest(request);
-  return true;
-}
-
-async function deliverAskRequest(request) {
-  const payload = buildAskRequestPayload({
-    question: request.question,
-    history: request.history,
-    webEnabled: request.webEnabled,
-    videoId: request.snapshot.videoId,
-    transcriptText: currentTranscriptTimestamped || currentTranscriptText,
-    videoTitle: currentVideoTitle,
-    channelName: currentChannelName,
-    videoDescription: currentVideoDescription,
-    videoDuration: currentVideoDuration,
-    overview: currentAnalysis,
-  });
-
-  let result;
-  try {
-    result = await chrome.runtime.sendMessage(payload);
-  } catch (error) {
-    result = {
-      success: false,
-      message: error.message || "Could not answer this question.",
-    };
-  }
-
-  if (
-    !applyAskRequestResult(
-      askState,
-      request.snapshot,
-      result,
-      request.question,
-    )
-  ) {
-    return;
-  }
-  renderAskConversation();
-  updateAskComposerUi();
-}
-
-async function ensureAskSuggestions({ retry = false } = {}) {
-  if (retry) {
-    askState.suggestionsRequested = false;
-    askState.suggestionsError = "";
-  }
-  if (!shouldLoadAskSuggestions(askState) || !currentTranscriptTimestamped) {
-    renderAskSuggestions();
-    return;
-  }
-
-  askState.suggestionsLoading = true;
-  askState.suggestionsRequested = true;
-  const snapshot = {
-    videoId: askState.videoId,
-    generation: askState.generation,
-  };
-  renderAskSuggestions();
-
-  try {
-    const result = await chrome.runtime.sendMessage({
-      action: "suggestVideoQuestions",
-      videoId: snapshot.videoId,
-      transcriptText: currentTranscriptTimestamped,
-      videoTitle: currentVideoTitle,
-      channelName: currentChannelName,
-      videoDescription: currentVideoDescription,
-      videoDuration: currentVideoDuration,
-      overview: currentAnalysis,
-    });
-    if (!isCurrentAskSnapshot(askState, snapshot)) return;
-
-    const suggestions = normalizeAskUiSuggestions(result?.suggestions);
-    if (result?.success === true && suggestions.length === 3) {
-      askState.suggestions = suggestions;
-      askState.suggestionsContextReduced = result.contextReduced === true;
-      askState.suggestionsError = "";
-      await saveToCache(snapshot.videoId);
-    } else {
-      askState.suggestionsError = String(
-        result?.message || result?.error || "Suggested questions are unavailable.",
-      )
-        .trim()
-        .slice(0, 500);
-    }
-  } catch (error) {
-    if (!isCurrentAskSnapshot(askState, snapshot)) return;
-    askState.suggestionsError = String(
-      error.message || "Suggested questions are unavailable.",
-    )
-      .trim()
-      .slice(0, 500);
-  } finally {
-    if (isCurrentAskSnapshot(askState, snapshot)) {
-      askState.suggestionsLoading = false;
-      renderAskSuggestions();
-      updateAskComposerUi();
-    }
-  }
-}
-
-function captureAskFocusedControl(container) {
-  const active = document.activeElement;
-  if (!active || !container?.contains(active)) return null;
-  return { key: String(active.dataset?.askFocusKey || "") };
-}
-
-function restoreAskFocusedControl(snapshot) {
-  if (!snapshot) return;
-  const candidate = snapshot.key
-    ? document.querySelector(
-        `[data-ask-focus-key="${CSS.escape(snapshot.key)}"]`,
-      )
-    : null;
-  if (candidate) {
-    candidate.focus({ preventScroll: true });
-    return;
-  }
-  document.getElementById("askInput")?.focus({ preventScroll: true });
-}
-
-function getAskStatusAnnouncement(state) {
-  if (state.loading) {
-    return {
-      key: `loading:${state.statusSequence}`,
-      text: "AI is thinking.",
-    };
-  }
-  const latest = [...state.messages]
-    .reverse()
-    .find((message) => message.role === "assistant");
-  if (!latest) return null;
-  const prefix = latest.status === "error" ? "AI answer failed. " : "AI answer: ";
-  return {
-    key: `${latest.status}:${latest.id}`,
-    text: `${prefix}${String(latest.content || "").slice(0, 2_000)}`,
-  };
-}
-
-function announceAskStatus(state) {
-  const status = document.getElementById("askStatus");
-  if (!status) return;
-  const announcement = getAskStatusAnnouncement(state);
-  if (!announcement) {
-    status.textContent = "";
-    return;
-  }
-  if (state.lastAnnouncementKey === announcement.key) return;
-  state.lastAnnouncementKey = announcement.key;
-  status.textContent = announcement.text;
-}
-
-function renderAskSuggestions() {
-  const container = document.getElementById("askGeneratedSuggestions");
-  if (!container) return;
-  const focusSnapshot = captureAskFocusedControl(container);
-  container.replaceChildren();
-
-  if (askState.suggestionsLoading) {
-    const status = document.createElement("span");
-    status.className = "ask-suggestions-status";
-    status.textContent = "Generating video-specific questions...";
-    container.appendChild(status);
-    restoreAskFocusedControl(focusSnapshot);
-    return;
-  }
-
-  if (askState.suggestions.length) {
-    askState.suggestions.forEach((suggestion, index) => {
-      const button = document.createElement("button");
-      button.className = "ask-chip";
-      button.type = "button";
-      button.textContent = suggestion;
-      button.dataset.askFocusKey = `suggestion:${index}`;
-      button.addEventListener("click", () => {
-        const action = resolveAskChipAction(
-          suggestion,
-          askState.webEnabled,
-          false,
-        );
-        submitAskQuestion(action.question);
-      });
-      container.appendChild(button);
-    });
-    restoreAskFocusedControl(focusSnapshot);
-    return;
-  }
-
-  if (askState.suggestionsError) {
-    const status = document.createElement("span");
-    status.className = "ask-suggestions-status";
-    status.textContent = "Video-specific questions are unavailable.";
-    const retryButton = document.createElement("button");
-    retryButton.className = "ask-suggestions-retry";
-    retryButton.type = "button";
-    retryButton.textContent = "Retry";
-    retryButton.dataset.askFocusKey = "suggestions-retry";
-    retryButton.addEventListener("click", () =>
-      ensureAskSuggestions({ retry: true }),
-    );
-    container.append(status, retryButton);
-  }
-  restoreAskFocusedControl(focusSnapshot);
-}
-
-function renderAskConversation() {
-  const messagesContainer = document.getElementById("askMessages");
-  if (!messagesContainer) return;
-  const focusSnapshot = captureAskFocusedControl(messagesContainer);
-  messagesContainer.replaceChildren();
-
-  if (!askState.messages.length && !askState.loading) {
-    const empty = document.createElement("div");
-    empty.className = "ask-empty";
-    empty.textContent =
-      "Choose a suggested question or ask anything grounded in this video.";
-    messagesContainer.appendChild(empty);
-  }
-
-  askState.messages.forEach((message) => {
-    const messageElement = document.createElement("article");
-    const visualRole = message.status === "error" ? "error" : message.role;
-    messageElement.className = `ask-message ${visualRole}`;
-    messageElement.dataset.messageId = message.id;
-    messageElement.setAttribute(
-      "aria-label",
-      message.role === "user" ? "Your question" : "AI answer",
-    );
-
-    const messageBody = document.createElement("div");
-    messageBody.className = "ask-message-body";
-    messageBody.textContent = message.content;
-    messageElement.appendChild(messageBody);
-
-    if (message.status === "error") {
-      const retryButton = document.createElement("button");
-      retryButton.className = "ask-retry-btn";
-      retryButton.type = "button";
-      retryButton.textContent = "Retry";
-      retryButton.dataset.askFocusKey = `retry:${message.id}`;
-      retryButton.addEventListener("click", () => {
-        submitAskQuestion(message.retryQuestion, {
-          retryMessageId: message.id,
-        });
-      });
-      messageElement.appendChild(retryButton);
-    }
-
-    if (message.contextReduced || message.webWarning) {
-      const metadata = document.createElement("div");
-      metadata.className = "ask-message-meta";
-      if (message.contextReduced) {
-        const contextLabel = document.createElement("span");
-        contextLabel.className = "ask-context-label";
-        contextLabel.textContent = "Selected transcript excerpts used";
-        metadata.appendChild(contextLabel);
-      }
-      if (message.webWarning) {
-        const warning = document.createElement("span");
-        warning.className = "ask-web-warning";
-        warning.textContent = message.webWarning;
-        metadata.appendChild(warning);
-      }
-      messageElement.appendChild(metadata);
-    }
-
-    if (Array.isArray(message.sources) && message.sources.length) {
-      const sources = document.createElement("div");
-      sources.className = "ask-sources";
-      const sourcesTitle = document.createElement("div");
-      sourcesTitle.className = "ask-sources-title";
-      sourcesTitle.textContent = "Web sources";
-      sources.appendChild(sourcesTitle);
-      message.sources.forEach((source, sourceIndex) => {
-        const sourceLink = document.createElement("a");
-        sourceLink.className = "ask-source-link";
-        sourceLink.href = source.url;
-        sourceLink.target = "_blank";
-        sourceLink.rel = "noopener noreferrer";
-        sourceLink.textContent = source.title;
-        sourceLink.dataset.askFocusKey = `source:${message.id}:${sourceIndex}`;
-        sources.appendChild(sourceLink);
-      });
-      messageElement.appendChild(sources);
-    }
-
-    messagesContainer.appendChild(messageElement);
-  });
-
-  if (askState.loading) {
-    const thinkingMessage = document.createElement("div");
-    thinkingMessage.className = "ask-message assistant";
-    const thinking = document.createElement("div");
-    thinking.className = "ask-message-body ask-thinking";
-    thinking.textContent = "Thinking...";
-    thinkingMessage.appendChild(thinking);
-    messagesContainer.appendChild(thinkingMessage);
-  }
-
-  const askScrollRegion = document.getElementById("askScrollRegion");
-  if (askScrollRegion) {
-    askScrollRegion.scrollTop = askScrollRegion.scrollHeight;
-  }
-  restoreAskFocusedControl(focusSnapshot);
-  announceAskStatus(askState);
-}
-
-function renderAskUi() {
-  setAskWebEnabled(askState.webEnabled);
-  renderAskSuggestions();
-  renderAskConversation();
-  updateAskComposerUi();
-}
-
-/**
- * Triggers the LLM analysis (lazy-loaded when user clicks Overview or Quotes tab).
- * This saves tokens by not running analysis until needed.
- */
 async function triggerAnalysis() {
   if (!currentTranscriptTimestamped || isAnalysisLoading || currentAnalysis)
     return;
@@ -2574,128 +1863,7 @@ function sanitizeFilename(str) {
  * When user selects text, shows Explain and vocabulary Save actions.
  */
 function setupExplainFeature() {
-  explainSelectionAbortController?.abort();
-  explainSelectionAbortController = null;
-  const transcriptList = document.getElementById("transcriptList");
-  if (!transcriptList) return;
-  explainSelectionAbortController = new AbortController();
-
-  // Remove existing tooltip if any
-  const existingTooltip = document.getElementById("explainTooltip");
-  if (existingTooltip) existingTooltip.remove();
-
-  // Create the selection actions.
-  const tooltip = document.createElement("div");
-  tooltip.id = "explainTooltip";
-  tooltip.className = "explain-tooltip";
-  tooltip.innerHTML = `<button class="explain-btn" type="button">💡 Explain</button><button class="vocabulary-save-btn" type="button">Save</button>`;
-  tooltip.style.display = "none";
-  document.body.appendChild(tooltip);
-
-  let selectedText = "";
-  let selectedContext = "";
-  let selectedVocabularyMetadata = null;
-
-  // Interacting with Explain must preserve the transcript selection and stay
-  // isolated from document/row click behavior.
-  tooltip.addEventListener("mousedown", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-  });
-  tooltip.addEventListener("mouseup", (event) => {
-    event.stopPropagation();
-  });
-  tooltip.addEventListener("click", (event) => {
-    event.stopPropagation();
-  });
-
-  // Listen for text selection
-  document.addEventListener(
-    "mouseup",
-    (e) => {
-      const selection = window.getSelection();
-      const text = selection.toString().trim();
-
-      // Only show if selecting within transcript
-      const isInTranscript = transcriptList.contains(selection.anchorNode);
-
-      // Allow any selection length (removed 10+ char requirement)
-      if (text.length > 0 && isInTranscript) {
-        selectedText = text;
-        const selectedTranscriptEntry = getSelectionTranscriptEntry(
-          selection,
-          transcriptList,
-        );
-        selectedContext = buildExplainContextFromSelection(
-          selectedText,
-          selectedTranscriptEntry,
-          getActiveTranscriptSegments(),
-          currentTranscriptText || "",
-        );
-        selectedVocabularyMetadata = buildVocabularySelectionMetadata(
-          selectedText,
-          selectedTranscriptEntry,
-          getActiveTranscriptSegments(),
-          currentTranscriptText || "",
-          {
-            videoId: currentVideoId,
-            videoTitle: currentVideoTitle,
-            channelName: currentChannelName,
-          },
-        );
-
-        // Position the tooltip near the selection
-        const range = selection.getRangeAt(0);
-        const rect = range.getBoundingClientRect();
-
-        tooltip.style.display = "block";
-        tooltip.style.top = `${rect.bottom + window.scrollY + 8}px`;
-        tooltip.style.left = `${rect.left + rect.width / 2}px`;
-      } else {
-        tooltip.style.display = "none";
-      }
-    },
-    { signal: explainSelectionAbortController.signal },
-  );
-
-  // Hide tooltip when clicking elsewhere
-  document.addEventListener(
-    "mousedown",
-    (e) => {
-      if (!tooltip.contains(e.target)) {
-        tooltip.style.display = "none";
-      }
-    },
-    { signal: explainSelectionAbortController.signal },
-  );
-
-  // Handle explain button click
-  tooltip
-    .querySelector(".explain-btn")
-    .addEventListener("click", async (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      if (!selectedText) return;
-
-      await showExplanation(
-        selectedText,
-        selectedContext,
-        selectedVocabularyMetadata,
-        event.currentTarget,
-      );
-    });
-
-  tooltip
-    .querySelector(".vocabulary-save-btn")
-    .addEventListener("click", async (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      if (!selectedVocabularyMetadata) return;
-      await saveVocabularySelection(
-        selectedVocabularyMetadata,
-        event.currentTarget,
-      );
-    });
+  globalThis.YTD_LEARNING_UI?.installCapture();
 }
 
 /**
@@ -2901,8 +2069,8 @@ async function showExplanation(
       </div>
       <div class="explain-selected-text">"${escapeHtml(selectedText.substring(0, 200))}${selectedText.length > 200 ? "..." : ""}"</div>
       <div class="explain-language-controls" role="group" aria-label="Explanation language">
-        <button class="explain-language-btn active" type="button" data-explain-mode="english" aria-pressed="true">English</button>
-        <button class="explain-language-btn" type="button" data-explain-mode="zh" aria-pressed="false">中文</button>
+        <button class="explain-language-btn" type="button" data-explain-mode="english" aria-pressed="false">English</button>
+        <button class="explain-language-btn active" type="button" data-explain-mode="zh" aria-pressed="true">中文</button>
         <button class="explain-language-btn" type="button" data-explain-mode="bilingual" aria-pressed="false">双语</button>
       </div>
       <div class="explain-modal-content" id="explanationContent">
@@ -2924,6 +2092,7 @@ async function showExplanation(
     modalVideoTitle,
   );
   const contentDiv = modal.querySelector("#explanationContent");
+  state.mode = "zh";
   const modeButtons = modal.querySelectorAll("[data-explain-mode]");
   const closeButton = modal.querySelector("#closeExplain");
   const saveVocabularyButton = modal.querySelector(
@@ -3230,6 +2399,7 @@ async function refreshVocabularyEntries(requestSnapshot = null) {
 }
 
 function renderVocabularyForCurrentFilter() {
+  if (globalThis.YTD_LEARNING_UI) { globalThis.YTD_LEARNING_UI.renderLibrary(); return; }
   const entries = showAllVocabulary
     ? vocabularyEntries
     : vocabularyEntries.filter((entry) => entry.videoId === currentVideoId);
@@ -4075,11 +3245,6 @@ async function saveToCache(videoId, requestSnapshot = null) {
       videoTitle: currentVideoTitle,
       channelName: currentChannelName,
       paragraphCache: paragraphCacheForVideo,
-      askSuggestions:
-        askState.videoId === videoId ? [...askState.suggestions] : [],
-      askSuggestionsContextReduced:
-        askState.videoId === videoId &&
-        askState.suggestionsContextReduced === true,
       timestamp: Date.now(),
     };
 
@@ -5025,17 +4190,6 @@ globalThis.__YTD_TRANSCRIPT_TESTING__ = {
   buildAudioTranscriptionConfirmation,
 };
 
-globalThis.__YTD_ASK_UI_TESTING__ = {
-  createAskState,
-  resetAskStateForVideo,
-  shouldLoadAskSuggestions,
-  beginAskRequest,
-  applyAskRequestResult,
-  buildAskRequestPayload,
-  resolveAskChipAction,
-  isCurrentAskSnapshot,
-  normalizeAskAssistantResult,
-};
 
 globalThis.__YTD_VOCABULARY_UI_TESTING__ = {
   buildVocabularySelectionMetadata,
@@ -5061,6 +4215,18 @@ globalThis.__YTD_RACE_TESTING__ = {
     digestGeneration,
     analysisGeneration,
     youtubeTabId,
-    askVideoId: askState.videoId,
   }),
+};
+
+// Narrow bridge for modular learning UI; keys and provider transport stay in the worker.
+globalThis.YTD_PANEL = {
+  context: () => ({ videoId: currentVideoId, videoTitle: currentVideoTitle,
+    channelName: currentChannelName, tabId: youtubeTabId, generation: digestGeneration,
+    segments: getActiveTranscriptSegments(), libraryView: currentLibraryView }),
+  vocabulary: () => vocabularyEntries,
+  refreshVocabulary: refreshVocabularyEntries,
+  switchLibraryView, switchTab,
+  explain: (m) => showExplanation(m.term, m.context, m),
+  speak: (text) => speakVocabularyTerm(text, "en", window.speechSynthesis, window.SpeechSynthesisUtterance),
+  seek: (entry) => openVocabularyTimestamp(entry, getSafeHttpUrl(entry.timestampedUrl)),
 };

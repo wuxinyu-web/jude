@@ -1,36 +1,22 @@
-# Project Guide
+# Project guide
 
-YouTube Digest is a Manifest V3 Chrome extension built with plain HTML, CSS, and JavaScript. There is no compile or bundle step.
+YouTube Digest 学习开发版 is a plain HTML/CSS/JavaScript Manifest V3 extension. Runtime files and the pinned Word browser library are checked in; no application build step is needed to load it.
 
-## Source map
+## Boundaries
 
-- `manifest.json`: permissions, entry points, and release version.
-- `background.js`: Supadata, DeepSeek, and optional Tavily requests, schema validation, caching, notes, vocabulary, and Ask.
-- `content.js`: YouTube page integration and playback control.
-- `sidepanel.html`, `sidepanel.css`, `sidepanel.js`: panel UI and interactions.
-- `settings.*`: API-key setup and provider guidance.
-- `prompts/`: human-readable copies of production prompt contracts.
-- `tests/`: Node tests for behavior and release policy.
-- `docs/ARCHITECTURE.md`: current feature boundaries, data flow, and trust model.
+- User-approved Study and sentence features replace Ask and web search. Do not restore retired request handlers, host permissions or keys.
+- Supadata native mode is always first; audio generation requires an explicit user confirmation after no native transcript. Never call paid providers in automated tests.
+- Keep original Notes and Vocabulary schema/IDs; keep the 500-entry vocabulary cap and separate 500-entry sentence cap. Never silently evict collections.
+- Source sentences are durable before AI analysis; failures remain retryable. Deletion/manual tag edits must survive in-flight completions.
+- All provider output is untrusted bounded plain text. Prompts treat transcript/metadata as quoted data, not instructions. Never put real secrets in source, fixtures, logs, exports or packages.
+- New learning/data APIs are extension-page only. Study pulses use the sending tab and authoritative active-window checks. Do not credit background, buffering, offline, sleep or restart gaps.
+- Overview quote notes preserve displayed language through saveOverviewNote, not transcript-note cleanup.
+- Transcript search stays literal, bounded and compatible with Vocabulary highlights. It must not seek video playback.
+- Transcript reading position remains in chrome.storage.session, up to 20 videos; never restore another video's state.
+- Resolve content from the active YouTube tab only. No background fallback.
+- Pronunciation uses local system voices. No remote speech service.
+- Keep README.md, README.zh-CN.md, PRIVACY.md, SECURITY.md, docs/ARCHITECTURE.md and prompt contracts consistent with behavior.
 
-## Product boundaries
+## Checks
 
-- Always request Supadata `mode=native` first. Never generate a transcript automatically.
-- Offer audio transcription only after a native `NO_TRANSCRIPT` result, and send `mode=generate` only after explicit user confirmation.
-- Do not make paid live-provider calls during automated tests.
-- Overview quote notes must save the language currently displayed through the dedicated `saveOverviewNote` path; do not route them through transcript note cleanup.
-- Ask Web search is explicit opt-in, remains off by default, and uses an optional bring-your-own Tavily key. Without Web, do not contact Tavily; search failure must degrade to video-only Ask.
-- Keep Ask conversation history in panel memory only and never persist it. Clear it when the active video changes or the panel closes; cache only the three generated suggestions.
-- Keep the Vocabulary schema separate from notes and enforce the 500-entry cap. Global transcript highlight matching must remain safe and bounded.
-- Keep Transcript search literal and bounded. Clearing or refreshing search must preserve Vocabulary highlights and must not seek video playback.
-- Store Transcript reading position only in `chrome.storage.session`, keep at most 20 recent videos, and never restore a stale position into another video.
-- Resolve panel content from the active YouTube tab only. Never fall back to a background YouTube tab.
-- Vocabulary pronunciation uses a local Chrome or system voice and sends or stores no audio. Do not add a remote speech service without updating permissions, privacy, docs, and tests.
-- Treat provider output as untrusted: validate expected JSON shapes and escape rendered text.
-- Validate Tavily source URLs and bound transcript, Ask history, web result, storage, and rendered-content sizes.
-- Keep the bring-your-own-key model. Never add real secrets to source, fixtures, prompts, logs, or packages.
-- Keep `README.md`, `README.zh-CN.md`, `PRIVACY.md`, and matching files in `prompts/` synchronized when behavior or data flow changes.
-
-## Verification
-
-Run `npm test`, `npm run check`, and `npm run package`. Reload the unpacked extension and perform real-video checks separately; automated checks do not prove YouTube or provider availability.
+Run npm test, npm run check and npm run package. Browser integration tests use an isolated profile and no live provider calls. Separately verify real captioned videos. Render generated DOCX samples and inspect every page before claiming print layout is verified.

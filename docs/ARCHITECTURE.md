@@ -1,104 +1,37 @@
-# Architecture and Product Boundaries
+# Study extension architecture
 
-## Goals
+## Existing pipeline
 
-1. Explain supports English, Simplified Chinese, and bilingual modes.
-2. Ask provides transcript-grounded suggestions and session-only multi-turn conversation, with optional Tavily web search.
-3. Library keeps Notes and Vocabulary separate while supporting reusable learning entries and cross-video highlighting.
-4. Transcript supports safe literal search and session-only reading-position restore without changing playback or borrowing a background tab.
+The extension keeps its plain JavaScript Manifest V3 architecture. background.js owns provider transport and existing transcript, Overview, translation, Notes and Vocabulary behavior. sidepanel.js retains reading, highlighting and video reconciliation. settings.js fixes the DeepSeek endpoint/model; keys remain local. Supadata native mode is always first and audio generation requires explicit confirmation.
 
-## Navigation and interaction
+## Learning modules and messages
 
-The top navigation contains four equal tabs: Transcript, Overview, Library, and Ask. Library contains a Notes/Vocabulary segmented control. Notes retains its current This Video/All Notes filter. Vocabulary has This Video/All Vocabulary filters.
+lib/learning-core.js contains pure source validation, English lexical boundaries, sentence analysis validation, filtering/grouping, preferences and real-time accounting. lib/learning-worker.js owns serialized local mutations and limited provider concurrency. Its createServices factory accepts storage/AI/clock/environment adapters for deterministic tests.
 
-Selecting text inside any rendered Transcript language mode opens a two-action selection control: Explain and Save. Explain opens the current modal with an English/中文/双语 control. English is the default. The selected excerpt remains in its original displayed language; only the explanation changes. The modal also offers Save to Vocabulary.
+Extension-page messages: lookupVocabulary, getLearningLibrary, saveSentence, analyzeSentence, editSentence, deleteSentence, markReview, setLearningPreferences, getStudy, studyCommand, studyPanelActivity. Content scripts can only use the separately authenticated studyPulse action. Responses have success plus result fields or an error. Keys never travel to content scripts.
 
-Ask opens with three fixed actions (Summarize video, Recommend related content, Quiz me), three AI-generated video-specific questions, a message history, and a sticky composer. A Web control is off by default. Recommend related content turns Web on automatically. Other questions use Tavily only when Web is visibly enabled.
+Vocabulary retains ytd_vocabulary and its 500-entry schema/cap. New ytd_sentences holds up to 500 source-first records with source context, translationZh, mainClause, breakdown, grammarTags, expressionTags, analysisStatus/revision and tagsEdited. ytd_reviews maps entry IDs to known/again and reviewedAt. ytd_learning_preferences stores library filters and session defaults. Existing longer vocabulary entries remain untouched. AI completion updates re-read the current record and honor its revision/manual-label flag.
 
-Ask answers follow the language of the user's question. Conversation history exists only for the current panel session and video. Changing videos or closing the side panel clears it.
+Word lookup cache keys include normalized word, video and context; at most 200 entries / 30 minutes, two active requests, deduplicated in flight. Sentence analysis has a separate two-request cap. Neither collection silently evicts entries. Analysis begins explicitly after the durable source save; a lost worker leaves a recoverable pending source.
+
+## Study accounting
+
+ytd_study holds currentId and sessions. A session binds videoId/tabId/windowId, targetMs, goals, state, accumulated watchMs/activityMs/reviewMs, collection IDs, daily buckets and lastSample. States: running, paused, due, review, ended. Only explicit resume/extend starts accounting again; playback itself is not automatically resumed. A changed video or video end pauses a running session.
+
+lib/study-content.js samples every two seconds and on playback/visibility transitions. The worker verifies the tab and focused window using Chrome APIs. Samples must be consecutive, at most six seconds apart, in the same accounting mode and worker boot. Missing/restarted intervals are discarded. Watching requires a visible, playing, ready video without seeking. Operation/review credit additionally requires a live panel heartbeat and interaction within 60 seconds. Categories never overlap; watching/activity stop exactly at the target. Cross-midnight credit is split by local date. Seven-day totals are calculated from daily buckets; noncurrent sessions older than 90 days are pruned when starting/updating sessions.
+
+A reversible html attribute activates distraction CSS. Play/ended listeners interrupt automatic continuation while the mode is active, without persisting YouTube autoplay preferences. The control UI always permits exiting. This measures behavior, not attention or attainment.
+
+## UI and Word
+
+lib/learning-ui.js uses a narrow YTD_PANEL bridge, event delegation and generation checks for hover and selections. Original-language text is extracted from DOM ranges rather than including timestamp/translation/action text. Cards render provider data as text. Multi-label grouping may duplicate display cards; selected/exported IDs are deduplicated.
+
+lib/word-export.js is shared by browser download and Node tests. vendor/docx.umd.js is the pinned 9.6.1 browser build; refresh with npm run vendor:docx. It writes A4 portrait OOXML with CJK font, safe source links, page fields, and separate self-test answers. Exports receive only selected content fields. npm run package includes all runtime modules, prompt contracts and vendor license through an explicit allowlist.
 
 ## Transcript search and reading position
 
-Transcript search is local, literal, case-insensitive where appropriate, and bounded to a 200-character query. It navigates previous and next matches with wraparound, pauses auto-follow when the user moves to a match, and never seeks video playback. Search marks are separate from Vocabulary marks, so clearing or reapplying search preserves saved Vocabulary highlighting.
+Existing search stays literal, bounded and independent of Vocabulary highlighting. Reading positions for up to 20 videos live in chrome.storage.session and expire at browser-session end. Reading, metadata and analysis follow the active YouTube tab only, never a background fallback. Switching tabs away from Transcript captures its position without treating Library/Study scrolling as transcript reading.
 
-The side panel saves only `scrollTop` and an update time in Chrome `storage.session`, keyed by video ID. It retains at most 20 recent video positions and removes them automatically when the browser session ends. Restore happens only after the matching video's Transcript has rendered; stale video snapshots are ignored.
+## Validation
 
-Both the background relay and the side panel resolve the active YouTube tab only. If that active tab is not a supported watch page, the panel closes or disables instead of selecting a background YouTube tab.
-
-## Explain data flow
-
-`explainSelection` continues to generate one concise English explanation from the selected text and its transcript context. The Explain prompt explicitly requires English so the source explanation is stable.
-
-The modal keeps local state for the English result, optional Chinese translation, selected mode, and translation status. Switching to 中文 or 双语 lazily sends the English explanation through the existing structured translation path using a new `explainBatch` content type. The Chinese result is reused while the modal remains open. Bilingual mode renders escaped English above escaped Chinese with a divider.
-
-If the user selected translated text, the side panel derives context from the containing transcript segment and adjacent source segments rather than searching for translated text in the original transcript string. Closing a modal invalidates late Explain or translation results.
-
-If translation fails, the English explanation stays available and the Chinese area offers Retry. Retrying translation does not regenerate the English explanation.
-
-## Ask architecture
-
-The side panel owns session state: current video ID, message history, generated suggestions, loading state, and a generation counter. Only one Ask request may be active. Video changes increment the counter so old responses cannot render into a new video.
-
-The background service worker exposes separate validated actions for generating suggested questions and answering a video question. Both reuse the existing DeepSeek request helper, timeouts, non-thinking mode, and key isolation.
-
-Questions are limited to 2,000 characters. History is limited to the most recent six user/assistant rounds and 12,000 total characters. The background accepts only alternating user/assistant text roles and rebuilds the validated history rather than trusting the side-panel payload.
-
-For normal-length videos, Ask sends the complete timestamped transcript. The request context is capped at 120,000 transcript characters. Above that limit, the context builder combines any cached Overview summary and chapters with question-relevant timestamped segments and evenly sampled beginning, middle, and ending segments. The UI marks answers based on a reduced transcript as using selected excerpts.
-
-The Ask system prompt treats transcripts, video metadata, web snippets, and conversation text as untrusted reference data. It ignores instructions embedded in those sources, answers from available evidence, cites transcript timestamps such as `[12:34]` when useful, and says when the video does not contain an answer. Quiz me asks one question at a time and uses the validated recent history to evaluate the next reply.
-
-Suggested questions are requested lazily on first opening Ask, validated as three short strings, and cached with the existing per-video digest cache. The three fixed actions remain available if suggestion generation fails.
-
-## Tavily search
-
-Settings adds an optional Tavily API Key under the existing bring-your-own-key model. It is stored in trusted Chrome local storage and never enters source files, prompts, logs, page scripts, or package artifacts. Missing Tavily configuration does not block Transcript, Overview, Explain, Notes, Vocabulary, or video-only Ask.
-
-When Web is enabled, the background builds a concise search query from the video title, the user question, and available Overview topics. It is capped below Tavily's 400-character query guidance. The background calls `POST https://api.tavily.com/search` with Bearer authentication, `search_depth: "basic"`, at most five results, `include_answer: false`, and no raw page content. This path therefore uses one Tavily search credit under the current documented pricing.
-
-Tavily output is untrusted. The background keeps only bounded titles, HTTP(S) URLs, content snippets, and finite relevance scores. DeepSeek synthesizes the final answer from the video context and validated search results. The UI renders escaped answer text followed by explicit, clickable source cards.
-
-If Tavily fails, the request continues with video-only context where possible and clearly reports that web search was unavailable. It never invents source links. Every README cost statement must be dated and linked to current official Tavily documentation.
-
-## Vocabulary architecture
-
-Vocabulary uses a separate `ytd_vocabulary` storage collection rather than overloading the note schema. Each validated entry contains an ID, selected term, normalized term, detected source language, Chinese meaning and explanation, optional phonetic notation, source excerpt, transcript context, video ID, title, channel, timestamp, timestamped URL, and creation time.
-
-Saving a new selection performs a duplicate check before any AI call. Latin text is normalized with Unicode normalization, collapsed whitespace, and lowercase comparison. CJK text uses Unicode normalization and collapsed whitespace. An existing normalized term returns an Already saved result without creating a duplicate or consuming another AI request.
-
-A new background action uses a dedicated structured prompt to produce a concise Chinese meaning, contextual explanation, and optional phonetic notation. Short Latin words and phrases use IPA; short Chinese entries use pinyin. Longer sentences omit phonetic notation rather than displaying an unreadable transcription. Provider JSON is validated and length-bounded before storage. Existing records without phonetic notation remain valid. The collection accepts at most 500 entries and returns a clear capacity error instead of silently deleting learning data.
-
-Vocabulary cards show the saved text, optional phonetic notation, a pronunciation button, Chinese meaning/explanation, source excerpt, video and timestamp link, and delete action. This Video filters by current video ID; All Vocabulary shows the global collection. Pronunciation uses Chrome's local `speechSynthesis`: English/Latin entries request `en-US` and automatically prefer an installed local Samantha `en-US` voice, with a case-insensitive name match. If Samantha is unavailable, the existing automatic voice ranking is used. Chinese entries request `zh-CN`, other languages keep automatic selection, and starting a new pronunciation cancels the previous utterance. No voice preference or audio is uploaded, downloaded, stored, or exposed. If speech synthesis is unavailable, the control is disabled with a clear label.
-
-The side panel loads normalized vocabulary terms before rendering Transcript. It reapplies highlighting after original or translated transcript content is rendered. Latin single words match whole words case-insensitively. Latin phrases, sentences, and CJK entries use normalized exact matching inside a displayed semantic segment. No stemming, fuzzy matching, or cross-segment matching is performed in this version.
-
-Highlighting operates on rendered text nodes after all provider content has been escaped, preserves allowlisted subtitle formatting, applies longer terms first, and never builds executable HTML or regular expressions from saved text. Saved matches use a high-saturation bright-yellow background with dark text for clear scanning.
-
-## Security, privacy, and failure behavior
-
-- API keys remain background-only and are read from trusted extension storage.
-- Tavily requires the minimum new host permission, `https://api.tavily.com/*`.
-- User questions, history, provider responses, URLs, and saved vocabulary fields are validated and bounded again in the background.
-- Model output, web snippets, and vocabulary text are escaped before rendering.
-- Link rendering accepts only `http:` and `https:` URLs and uses safe external navigation.
-- Transcript and search-result prompt injection is isolated as untrusted data and cannot change system instructions.
-- Ask disables duplicate sends while a request is active and rejects stale video responses.
-- Explain translation failures preserve the English result. Vocabulary generation failures save nothing. Tavily failures degrade to a labelled video-only answer.
-- README.md, README.zh-CN.md, PRIVACY.md, SECURITY.md, prompt documentation, release allowlists, and tests are updated with the new provider and data flows.
-
-## Testing and adversarial review
-
-Release tests cover:
-
-- Explain modes, lazy one-time translation, escaped bilingual rendering, retry, and translated-selection context.
-- Four top tabs, Library subviews, Ask composer behavior, current-video session reset, and stale-response suppression.
-- Ask question/history limits, role validation, long-transcript context reduction, timestamp grounding, suggestion JSON validation, and fallback behavior.
-- Tavily request shape, optional configuration, result and URL validation, no calls when Web is off, and labelled degradation when search fails.
-- Vocabulary normalization, global duplicate prevention before AI calls, schema validation, capacity behavior, filters, deletion, and exact safe highlighting.
-- Phonetic validation, backward compatibility for older entries, and local speech synthesis language/cancel/failure behavior.
-- Prompt files, host permissions, privacy copy, release allowlist, secret scanning, and packaging.
-
-No automated test may call DeepSeek, Supadata, or Tavily with a live key.
-
-Adversarial review targets prompt injection through transcripts and Tavily snippets, HTML/script injection through model fields, unsafe URL schemes, regex denial of service through vocabulary entries, oversized inputs, duplicate and Unicode edge cases, stale cross-video responses, key leakage, accidental Tavily calls with Web disabled, and silent paid-call behavior.
-
-Manual Chrome verification remains separate: reload the unpacked extension, test all Explain modes, exercise video-only and Web-enabled Ask on multiple videos, save vocabulary from original and translated modes, and confirm highlights reappear on another video.
+Node tests cover existing behavior, sentence/cache/storage races, mode transitions/time gaps, filtering, and DOCX XML. scripts/browser-test.cjs loads the real extension into an isolated browser profile with synthetic caption/provider fixtures. It makes no paid calls. Real YouTube/player/provider account checks remain a separate manual verification step. Never include test fixture profiles, screenshots or personal exports in the release ZIP.

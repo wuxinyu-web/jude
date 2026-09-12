@@ -612,39 +612,6 @@ test("all timestamped transcript row clicks use the selection-aware seek helper"
   );
 });
 
-test("the Explain and Save tooltip preserves selection and contains pointer events", () => {
-  assert.match(
-    source,
-    /tooltip\.addEventListener\("mousedown", \(event\) => \{\s+event\.preventDefault\(\);\s+event\.stopPropagation\(\);/,
-  );
-  assert.match(
-    source,
-    /tooltip\.addEventListener\("mouseup", \(event\) => \{\s+event\.stopPropagation\(\);/,
-  );
-  assert.match(
-    source,
-    /\.addEventListener\("click", async \(event\) => \{\s+event\.preventDefault\(\);\s+event\.stopPropagation\(\);/,
-  );
-  assert.match(source, /div\.dataset\.segmentId = group\.id/);
-  assert.match(source, /div\.dataset\.segmentIndex = index/);
-  assert.match(
-    source,
-    /buildExplainContextFromSelection\([\s\S]*?selectedTranscriptEntry[\s\S]*?getActiveTranscriptSegments\(\)/,
-  );
-  assert.match(
-    source,
-    /tooltip\.innerHTML = `[\s\S]*?class="explain-btn"[\s\S]*?class="vocabulary-save-btn"[\s\S]*?Save/,
-  );
-  assert.match(
-    source,
-    /buildVocabularySelectionMetadata\([\s\S]*?selectedText[\s\S]*?selectedTranscriptEntry[\s\S]*?getActiveTranscriptSegments\(\)/,
-  );
-  assert.match(
-    source,
-    /showExplanation\([\s\S]*?selectedText,[\s\S]*?selectedContext,[\s\S]*?selectedVocabularyMetadata,[\s\S]*?event\.currentTarget/,
-  );
-});
-
 test("the Explain modal snapshots video identity and exposes an accessible dialog", () => {
   const start = source.indexOf("async function showExplanation");
   const end = source.indexOf("// CACHING", start);
@@ -775,20 +742,10 @@ test("Explain modal traps keyboard focus and restores its invoker on every close
   );
 });
 
-test("repeated Explain setup aborts old document listeners before adding new ones", () => {
-  const start = source.indexOf("function setupExplainFeature()");
-  const end = source.indexOf("function getSelectionTranscriptEntry", start);
-  const setupSource = source.slice(start, end);
 
-  assert.match(source, /let explainSelectionAbortController = null/);
-  assert.match(
-    setupSource,
-    /explainSelectionAbortController\?\.abort\(\)[\s\S]*?explainSelectionAbortController = new AbortController\(\)/,
-  );
-  assert.equal(
-    (setupSource.match(/\{ signal: explainSelectionAbortController\.signal \}/g) || [])
-      .length,
-    2,
-    "mouseup and mousedown document listeners must share the abort signal",
-  );
+test("capture setup delegates to one idempotent learning listener installation", () => {
+  const learning = fs.readFileSync(path.join(__dirname, "../lib/learning-ui.js"), "utf8");
+  assert.match(source, /YTD_LEARNING_UI\?\.installCapture\(\)/);
+  assert.match(learning, /if\(captureInstalled\)return;captureInstalled=true/);
+  assert.match(learning, /box\.addEventListener\("pointerdown".*preventDefault\(\).*stopPropagation\(\)/);
 });

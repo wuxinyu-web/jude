@@ -648,31 +648,13 @@ test("runtime message actions expose save, get, and exact delete", async () => {
   assert.equal(deleted.deleted, true);
 });
 
-test("Library exposes Notes and Vocabulary with independent accessible filters", () => {
+test("Library retains notes and vocabulary and adds a separate sentence pane", () => {
   const html = read("sidepanel.html");
-
-  assert.match(html, /data-tab="library"[^>]*>Library<\/button>/);
-  assert.match(html, /data-panel="library"/);
-  assert.match(
-    html,
-    /id="libraryNotesTab"[^>]*aria-pressed="true"[^>]*>Notes<\/button>/,
-  );
-  assert.match(
-    html,
-    /id="libraryVocabularyTab"[^>]*aria-pressed="false"[^>]*>Vocabulary<\/button>/,
-  );
-  assert.match(html, /id="notesFilterThis"[\s\S]*?>[\s\S]*?This Video/);
-  assert.match(html, /id="notesFilterAll"[\s\S]*?>[\s\S]*?All Notes/);
-  assert.match(
-    html,
-    /id="vocabularyFilterThis"[^>]*aria-pressed="true"[\s\S]*?>[\s\S]*?This Video/,
-  );
-  assert.match(
-    html,
-    /id="vocabularyFilterAll"[^>]*aria-pressed="false"[\s\S]*?>[\s\S]*?All Vocabulary/,
-  );
-  assert.match(html, /id="vocabularyList"/);
-  assert.match(html, /id="vocabularyIntro"/);
+  for (const kind of ["Notes", "Vocabulary", "Sentences"]) {
+    assert.match(html, new RegExp(`id="library${kind}Tab"`));
+    assert.match(html, new RegExp(`id="library${kind}View"`));
+  }
+  assert.match(html, /id="learningLibraryToolbar"/);
 });
 
 test("vocabulary selection builds the exact backend save contract", () => {

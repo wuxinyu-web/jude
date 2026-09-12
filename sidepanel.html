@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>YouTube Digest</title>
     <link rel="stylesheet" href="sidepanel.css" />
+    <link rel="stylesheet" href="lib/learning.css" />
   </head>
   <body>
     <!-- HEADER -->
@@ -33,7 +34,7 @@
         <button class="tab active" data-tab="transcript">Transcript</button>
         <button class="tab" data-tab="overview">Overview</button>
         <button class="tab" data-tab="library">Library</button>
-        <button class="tab" data-tab="ask">Ask</button>
+        <button class="tab" data-tab="study">Study</button>
       </div>
     </div>
 
@@ -240,11 +241,11 @@
           </div>
         </div>
 
-        <!-- TAB: Library (notes + vocabulary) -->
+        <!-- TAB: Library -->
         <div class="tab-panel" data-panel="library">
           <div class="library-switch" role="group" aria-label="Library section">
             <button
-              class="library-switch-btn active"
+              class="library-switch-btn"
               id="libraryNotesTab"
               type="button"
               aria-pressed="true"
@@ -257,9 +258,12 @@
               aria-pressed="false"
               aria-controls="libraryVocabularyView"
             >Vocabulary</button>
+            <button class="library-switch-btn" id="librarySentencesTab" type="button" aria-pressed="false" aria-controls="librarySentencesView">Sentences</button>
           </div>
 
-          <div class="library-view" id="libraryNotesView">
+          <div id="learningLibraryToolbar"></div>
+          <div id="librarySentencesView" class="library-view" hidden><div id="sentencesList"></div></div>
+          <div class="library-view" id="libraryNotesView" hidden>
             <div class="section">
               <div class="section-header">
                 <div class="section-title">Saved Notes</div>
@@ -292,121 +296,16 @@
           <div
             class="library-view"
             id="libraryVocabularyView"
-            hidden
           >
             <div class="section">
-              <div class="section-header vocabulary-header">
-                <div class="section-title">Vocabulary</div>
-                <div class="vocabulary-filter">
-                  <button
-                    class="enhance-btn active"
-                    id="vocabularyFilterThis"
-                    type="button"
-                    aria-pressed="true"
-                  >
-                    This Video
-                  </button>
-                  <button
-                    class="enhance-btn"
-                    id="vocabularyFilterAll"
-                    type="button"
-                    aria-pressed="false"
-                  >
-                    All Vocabulary
-                  </button>
-                </div>
-              </div>
-              <p class="notes-intro" id="vocabularyIntro">
-                Select a word, phrase, or sentence in the transcript, then
-                choose Save to build your vocabulary.
-              </p>
+              <p class="notes-intro" id="vocabularyIntro"></p>
               <div id="vocabularyList"></div>
             </div>
           </div>
         </div>
 
-        <!-- TAB: Ask (session-only video conversation) -->
-        <div class="tab-panel ask-panel" data-panel="ask">
-          <div class="ask-heading">
-            <div class="section-title" id="askTitle">Ask about this video</div>
-            <p class="ask-intro">
-              Answers use this video's transcript. The conversation clears when
-              you switch videos or close the panel.
-            </p>
-          </div>
+        <div class="tab-panel" data-panel="study" id="studyPanel"></div>
 
-          <div class="ask-scroll-region" id="askScrollRegion">
-          <div class="ask-suggestions" aria-labelledby="askQuickQuestionsLabel">
-            <div class="ask-suggestions-label" id="askQuickQuestionsLabel">
-              Try asking
-            </div>
-            <div class="ask-chip-list">
-              <button
-                class="ask-chip"
-                type="button"
-                data-ask-question="总结视频"
-              >总结视频</button>
-              <button
-                class="ask-chip"
-                type="button"
-                data-ask-question="推荐相关内容"
-                data-enable-web="true"
-              >推荐相关内容</button>
-              <button
-                class="ask-chip"
-                type="button"
-                data-ask-question="考考我"
-              >考考我</button>
-            </div>
-            <div
-              class="ask-generated-suggestions"
-              id="askGeneratedSuggestions"
-              aria-label="Suggested questions"
-              aria-live="polite"
-            ></div>
-          </div>
-
-          <div
-            class="ask-messages"
-            id="askMessages"
-            aria-label="Conversation"
-          ></div>
-          <div
-            class="sr-only"
-            id="askStatus"
-            role="status"
-            aria-live="polite"
-            aria-atomic="true"
-          ></div>
-          </div>
-
-          <form class="ask-composer" id="askForm">
-            <label class="sr-only" for="askInput">Ask about this video</label>
-            <textarea
-              class="ask-input"
-              id="askInput"
-              maxlength="2000"
-              rows="2"
-              placeholder="Ask about this video..."
-            ></textarea>
-            <div class="ask-composer-error" id="askComposerError" role="alert"></div>
-            <div class="ask-composer-footer">
-              <label class="ask-web-toggle" for="askWebToggle">
-                <input id="askWebToggle" type="checkbox" />
-                <span aria-hidden="true" class="ask-web-switch"></span>
-                <span>Web</span>
-              </label>
-              <span class="ask-character-count" id="askCharacterCount">0 / 2000</span>
-              <button
-                class="ask-send-btn"
-                id="askSendBtn"
-                type="submit"
-                aria-label="Send question"
-                disabled
-              >Send</button>
-            </div>
-          </form>
-        </div>
       </div>
     </div>
 
@@ -420,6 +319,10 @@
     </button>
 
     <script src="settings.js"></script>
+    <script src="lib/learning-core.js"></script>
+    <script src="vendor/docx.umd.js"></script>
+    <script src="lib/word-export.js"></script>
     <script src="sidepanel.js"></script>
+    <script src="lib/learning-ui.js"></script>
   </body>
 </html>

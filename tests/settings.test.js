@@ -18,16 +18,16 @@ test("DeepSeek defaults use V4 Flash", () => {
   assert.equal(normalized.aiModel, "deepseek-v4-flash");
   assert.equal(normalized.aiApiKey, "example-key");
   assert.equal(normalized.supadataApiKey, "example-supadata");
-  assert.equal(normalized.tavilyApiKey, "example-tavily");
+  assert.equal(Object.hasOwn(normalized, "tavilyApiKey"), false);
   assert.equal(
     settings.chatCompletionsUrl(),
     "https://api.deepseek.com/chat/completions",
   );
 });
 
-test("Tavily API key stays optional", () => {
-  assert.equal(settings.normalize({}).tavilyApiKey, "");
-  assert.equal(settings.normalize({ tavilyApiKey: "   " }).tavilyApiKey, "");
+test("Removed search key is not part of normalized settings", () => {
+  assert.equal(settings.normalize({}).tavilyApiKey, undefined);
+  assert.equal(settings.normalize({ tavilyApiKey: "   " }).tavilyApiKey, undefined);
 });
 
 test("legacy custom migration clears only the AI key and is idempotent", () => {

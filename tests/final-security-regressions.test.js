@@ -133,29 +133,11 @@ test("background relay source contains no URL-filtered or arbitrary YouTube fall
   );
 });
 
-test("Transcript position lifecycle preserves Ask's single-scroll layout contract", () => {
-  const panelSource = read("sidepanel.js");
-  const panelStyles = read("sidepanel.css");
-  const switchStart = panelSource.indexOf("function switchTab(tabName)");
-  const switchEnd = panelSource.indexOf("// ASK", switchStart);
-  const switchSource = panelSource.slice(switchStart, switchEnd);
-
-  assert.match(
-    switchSource,
-    /contentArea\?\.classList\.toggle\("ask-mode", tabName === "ask"\)/,
-  );
-  assert.match(panelStyles, /\.content\.ask-mode\s*\{\s*overflow-y:\s*hidden;/);
-  assert.match(
-    panelStyles,
-    /\.content\.ask-mode #resultsState\s*\{[^}]*height:\s*100%;[^}]*min-height:\s*0;/,
-  );
-  const scrollHandlerStart = panelSource.indexOf("function onContentAreaScroll()");
-  const scrollHandlerEnd = panelSource.indexOf("// OVERVIEW MODE UI", scrollHandlerStart);
-  assert.match(
-    panelSource.slice(scrollHandlerStart, scrollHandlerEnd),
-    /if \(!transcriptTabIsActive\(\)\) return;/,
-    "Ask, Overview, and Library scrolling must not save Transcript position",
-  );
+test("Study and Library switches preserve the Transcript reading position boundary", () => {
+  const source = read("sidepanel.js");
+  assert.match(source, /transcriptTabIsActive\(\) && tabName !== "transcript"/);
+  assert.match(source, /captureTranscriptViewPosition\(\{ immediate: true \}\)/);
+  assert.doesNotMatch(source, /askState|ask-mode|data-tab="ask"/);
 });
 
 function deferred() {
@@ -365,6 +347,7 @@ function transcriptResult(label) {
   };
 }
 
+
 test("side panel tab reconciliation fails closed without an active tab", async () => {
   const harness = loadSidepanelRaceHarness({
     cacheGets: async () => ({}),
@@ -381,7 +364,7 @@ test("side panel tab reconciliation fails closed without an active tab", async (
   assert.equal(harness.helpers.getRaceState().currentVideoId, null);
 });
 
-test("side panel keeps video and Ask state when a non-YouTube tab is active", async () => {
+test("side panel keeps video state when a non-YouTube tab is active", async () => {
   const harness = loadSidepanelRaceHarness({
     activeTabs: [
       { id: 21, url: "https://www.youtube.com/watch?v=front" },
@@ -421,7 +404,6 @@ test("side panel keeps video and Ask state when a non-YouTube tab is active", as
   assert.equal(state.currentVideoUrl, "https://www.youtube.com/watch?v=front");
   assert.equal(state.youtubeTabId, 21);
   assert.equal(state.currentVideoTitle, "Front video");
-  assert.equal(state.askVideoId, "front");
   assert.equal(
     harness.tabCalls.runtime.some(
       (message) =>
@@ -451,7 +433,6 @@ test("side panel keeps video and Ask state when a non-YouTube tab is active", as
   ]);
   assert.equal(harness.tabCalls.closes, 1);
   assert.equal(state.currentVideoId, "front");
-  assert.equal(state.askVideoId, "front");
   assert.equal(
     harness.tabCalls.runtime.some(
       (message) =>
