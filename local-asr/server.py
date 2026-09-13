@@ -14,7 +14,7 @@ import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VIDEO = re.compile(r'BV[0-9A-Za-z]{10}(?:_p[1-9][0-9]{0,3})?\Z')
+VIDEO = re.compile(r'(?:BV[0-9A-Za-z]{10}(?:_p[1-9][0-9]{0,3})?|bili_ep[1-9][0-9]{0,11})\Z')
 JOB = re.compile(r'[0-9a-f]{32}\Z')
 TERMINAL = {'completed', 'failed', 'cancelled'}
 MAX_BODY = 4096
@@ -60,7 +60,7 @@ class Jobs:
     def start(self, video_id, segment=None):
         segment = validate_range(segment)
         if not isinstance(video_id, str) or not VIDEO.fullmatch(video_id):
-            raise ValueError('仅支持有效的 B 站 BV 视频和分 P。')
+            raise ValueError('仅支持有效的 B 站视频、分 P 和剧集编号。')
         with self.lock:
             for job_id, proc in self.processes.items():
                 if proc.poll() is None:
@@ -166,7 +166,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(403, {'error':'只允许配置中的学习扩展访问。'})
         try:
             if self.path == '/health':
-                return self.reply(200, {'ready':True,'engine':'Whisper 本地英文转写','modelReady':Path(self.server.jobs.model).is_dir(),'capabilities':['segments-v1']})
+                return self.reply(200, {'ready':True,'engine':'Whisper 本地英文转写','modelReady':Path(self.server.jobs.model).is_dir(),'capabilities':['segments-v1','episodes-v1']})
             if self.path.startswith('/jobs/'):
                 return self.reply(200, self.server.jobs.get(self.path[6:]))
             self.reply(404, {'error':'接口不存在。'})

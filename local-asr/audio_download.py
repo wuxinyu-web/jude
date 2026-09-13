@@ -12,9 +12,10 @@ class TranscriptionError(Exception):
 
 
 def validate_media(info, video_id, segment=None):
-    expected = video_id if '_p' in video_id else video_id + '_p1'
+    episode = video_id.startswith('bili_ep')
+    expected = video_id[7:] if episode else (video_id if '_p' in video_id else video_id + '_p1')
     actual = (info or {}).get('id', '')
-    if actual and '_p' not in actual:
+    if not episode and actual and '_p' not in actual:
         actual += '_p1'
     if not info or info.get('entries') is not None or actual != expected:
         raise TranscriptionError('VIDEO_MISMATCH', '未能读取指定分 P 的原声；请重新打开该分 P 后重试。')
@@ -73,7 +74,8 @@ def download_audio(folder, video_id, update, downloader_factory=None, segment=No
     from yt_dlp import YoutubeDL
     from yt_dlp.utils import DownloadError
     bvid, _, part = video_id.partition('_p')
-    url = f'https://www.bilibili.com/video/{bvid}/?p={part or 1}'
+    episode = video_id.startswith('bili_ep')
+    url = f'https://www.bilibili.com/bangumi/play/ep{video_id[7:]}' if episode else f'https://www.bilibili.com/video/{bvid}/?p={part or 1}'
     def progress(data):
         downloaded = data.get('downloaded_bytes', 0)
         if downloaded > MAX_BYTES:
@@ -86,9 +88,9 @@ def download_audio(folder, video_id, update, downloader_factory=None, segment=No
     with (downloader_factory or YoutubeDL)(options) as ydl:
         ydl.add_info_extractor(extractor_class()())
         try:
-            info = ydl.extract_info(url, download=False, process=False, ie_key='BiliBili')
+            info = ydl.extract_info(url, download=False, process=False, ie_key='BiliBiliBangumi' if episode else 'BiliBili')
         except DownloadError as error:
-            raise TranscriptionError('MEDIA_UNAVAILABLE', '无法读取公开视频原声。请确认此分 P 无需登录、付费或地区授权即可播放。') from error
+            raise TranscriptionError('MEDIA_UNAVAILABLE', '无法获取这段原声：可能需要会员、登录或地区授权。本地服务目前仅能读取公开音频；可换一个公开可播放的视频后重试。') from error
         validate_media(info, video_id, segment)
         candidates = audio_candidates(info.get('formats') or [])
         if not candidates:

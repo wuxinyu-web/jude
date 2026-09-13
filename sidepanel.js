@@ -1583,15 +1583,9 @@ function buildAudioTranscriptionConfirmation(durationSeconds) {
 }
 
 function showMissingTranscriptError(message) {
-  if (YTD_PLATFORM.biliParts(currentVideoId)?.episodeId) {
-    showError("这集暂未读取到字幕", "请确认当前账号可正常播放并已开启网站字幕，再重试。官方剧集暂不支持本地音频转写。");
-    document.getElementById("errorBtn").textContent="重新读取字幕";
-    errorAction=()=>startDigest(currentVideoId);
-    return;
-  }
   if (YTD_PLATFORM.biliParts(currentVideoId)) {
-    showError("没有可读取的字幕轨", "仍可直接识别英文音轨，生成英文字幕及中文翻译。长视频可按 20 分钟学习片段处理，需本地转写服务运行。");
-    document.getElementById("errorBtn").textContent="从英文原声生成字幕";
+    showError("没有可读取的字幕轨", "可以尝试识别英文原声，生成可点击、收藏的双语字幕。点击下方开始，前 20 句准备好后即可边看边加载；需本地转写服务运行。");
+    document.getElementById("errorBtn").textContent="识别英文原声，生成双语字幕";
     errorAction=async()=>{
       document.documentElement.setAttribute('data-awaiting-english','');
       showState('results');switchTab('transcript');renderTranscript();

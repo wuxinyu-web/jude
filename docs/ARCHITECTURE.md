@@ -113,4 +113,4 @@ Immersive row clicks position the clicked DOM row immediately, before the seek r
 
 Transcript row seeks request play=true; Bilibili acknowledges after play() resolves and reports failure if rejected. Scroll events only save reading position; explicit wheel/touch/keyboard/scrollbar input disables follow so translation reflow cannot stop playback tracking.
 
-Official Bilibili episodes use bili_ep<number> identities and ep source URLs. Season metadata resolves the exact episode aid/cid without falling back to the first episode. Signed player requests include ep_id/season_id. Local ASR remains BV-only; episode pages never launch unsupported jobs.
+Official Bilibili episodes use bili_ep<number> identities and ep source URLs. Season metadata resolves the exact episode aid/cid without falling back to the first episode. Signed player requests include ep_id/season_id. Local ASR accepts exact episode IDs and attempts public episode audio; access restrictions remain enforced.
