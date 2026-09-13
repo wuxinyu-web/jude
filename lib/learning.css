@@ -110,3 +110,6 @@ html.immersive .error-btn{margin-top:0;padding:8px 18px;color:#172012}
 
 /* Leave enough trailing space to top-align even the final playing caption. */
 html.immersive #transcriptList{padding-bottom:calc(100vh - 40px)}
+
+#localAsrStorageHint{font-size:11px;line-height:1.5;color:var(--text-muted);margin:3px 0}
+html.immersive #localAsrStorageHint{flex:0 0 100%;font-size:11px;margin:0}

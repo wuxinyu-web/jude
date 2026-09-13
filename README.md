@@ -132,3 +132,15 @@ The extension has no application build step. Runtime modules and the browser Wor
 Automated tests do not prove Supadata/DeepSeek account availability. Separately test a public captioned video with your own keys after loading the extension. Model output and grammar tags may be imperfect. Screenshots, browser fixtures and sample exports belong in ignored work directories, not release packages.
 
 MIT; original project copyright and license retained. See `PRIVACY.md`, `SECURITY.md`, `docs/ARCHITECTURE.md`, and the bundled library's `vendor/docx.LICENSE`.
+
+## 本地转写的内存、磁盘与清理规则
+
+识别英文原声需要临时下载音频（不是整部视频画面）并在本机运行模型，所以识别期间会占用内存和磁盘，并非完全不占资源。
+
+- 正常完成、失败或取消后，清理该任务的临时音频；无需等视频看完。
+- 转写进程退出后，操作系统释放其识别内存；浏览器和轻量本地服务仍会占用各自的运行内存。
+- 识别模型保留在本机磁盘供下次复用，不会随任务删除，也不会每次重新下载。
+- 字幕文本和翻译保留缓存，避免重复识别。扩展字幕缓存有效期为 30 天，按缓存读写规则淘汰；本地服务在启动时清理创建超过 7 天的任务目录，并非每天定时清理。
+- 强制终止进程或异常断电可能留下临时文件；不保证异常情况下立即清理。学习记录的 90 天保留规则与字幕缓存分开，清理学习记录不会删除收藏。
+
+加载中的简短提示会说明临时占用与自动清理，任务结束后收起，不持续占用字幕显示空间。
