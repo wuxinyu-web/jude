@@ -112,3 +112,5 @@ Sentence-save follow uses a video/generation/manual-scroll revision snapshot. Ex
 Immersive row clicks position the clicked DOM row immediately, before the seek response. The English text rectangle is aligned beneath the measured sticky toolbar with a 4px inset; post-seek following retains generation and manual-scroll guards.
 
 Transcript row seeks request play=true; Bilibili acknowledges after play() resolves and reports failure if rejected. Scroll events only save reading position; explicit wheel/touch/keyboard/scrollbar input disables follow so translation reflow cannot stop playback tracking.
+
+Official Bilibili episodes use bili_ep<number> identities and ep source URLs. Season metadata resolves the exact episode aid/cid without falling back to the first episode. Signed player requests include ep_id/season_id. Local ASR remains BV-only; episode pages never launch unsupported jobs.
