@@ -1,0 +1,40 @@
+name: Publish mobile demo
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare static demo
+        run: |
+          mkdir -p _site
+          cp index.html demo.css demo.js lesson.json lesson.mp4 icon.png poster.jpg _site/
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      # Pin the official REST-based release; newer versions fail when
+      # the artifact service ListArtifacts endpoint returns 403.
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4.0.0
