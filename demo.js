@@ -126,6 +126,32 @@
   $('word-dialog').setAttribute('aria-labelledby', 'word');
   $('about').addEventListener('click', () => $('about-dialog').showModal());
   document.querySelectorAll('[data-close]').forEach(button => button.addEventListener('click', () => button.closest('dialog').close()));
+  document.querySelectorAll('[data-download]').forEach(link => link.addEventListener('click', async event => {
+    event.preventDefault();
+    if (link.getAttribute('aria-busy') === 'true') return;
+    const label = link.textContent;
+    link.setAttribute('aria-busy', 'true');
+    link.textContent = '正在准备下载…';
+    try {
+      const response = await fetch(link.href, { cache: 'no-store' });
+      if (!response.ok) throw new Error(`Download failed: ${response.status}`);
+      const objectUrl = URL.createObjectURL(await response.blob());
+      const trigger = document.createElement('a');
+      trigger.href = objectUrl;
+      trigger.download = link.download;
+      document.body.append(trigger);
+      trigger.click();
+      trigger.remove();
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 30000);
+      toast('下载已开始，请查看浏览器下载记录。');
+    } catch {
+      toast('自动下载被拦截，正在打开文件。');
+      window.location.assign(link.href);
+    } finally {
+      link.removeAttribute('aria-busy');
+      link.textContent = label;
+    }
+  }));
   fetch('lesson.json').then(response => { if (!response.ok) throw Error('lesson'); return response.json(); }).then(data => {
     lessons = data;
     try {
