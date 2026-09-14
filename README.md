@@ -2,11 +2,32 @@
 
 边看视频，边学英语。支持哔哩哔哩与 YouTube 的双语字幕、查词、词句收藏和复习。
 
+## 手机网页体验
+
+**[打开手机交互演示](https://wuxinyu-web.github.io/jude/)**
+
+iPhone Safari、Chrome 和电脑浏览器均可直接打开。播放原创示例课堂，点击单词查看预置释义、切换双语字幕、收藏单词和整句；收藏仅保存在当前设备。
+
+这是独立网页演示，不会读取其他视频页面，不需要 API 密钥，也不是手机浏览器扩展。演示语音由系统语音合成生成。
+
+### iPhone Safari 扩展预览
+
+[下载未签名 Xcode 工程](https://github.com/wuxinyu-web/jude/releases/download/v1.17.0/jude-iphone-safari-1.17.0-project.zip) · [查看 iPhone 安装说明](IPHONE.md)
+
+Safari 扩展需要开发者签名和真机安装，目前没有 IPA 或 TestFlight 安装入口。iPhone Chrome 不能安装此扩展；可使用上面的独立网页演示。
+
+## v1.17.0 更新
+
+- 修复 Jude 与旧版 YouTube Digest 同时启用时反复创建按钮，导致 YouTube 卡住的问题。
+- 修复上下布局的视频黑屏，并保留 YouTube 原生遮罩的显示逻辑。
+- 增加 iPhone Safari 预览构建、移动页面适配和触摸查词。
+- 增加独立手机网页交互演示。
+
 ## 下载与安装
 
-**[下载句得 v1.16.4](https://github.com/wuxinyu-web/jude/releases/download/v1.16.4/jude-v1.16.4.zip)** · [查看所有版本](https://github.com/wuxinyu-web/jude/releases)
+**[下载句得 v1.17.0](https://github.com/wuxinyu-web/jude/releases/download/v1.17.0/jude-v1.17.0.zip)** · [查看所有版本](https://github.com/wuxinyu-web/jude/releases)
 
-1. 下载上面的 `jude-v1.16.4.zip` 并解压。
+1. 下载上面的 `jude-v1.17.0.zip` 并解压。
 2. 在桌面 Chrome 地址栏输入 `chrome://extensions`，打开右上角「开发者模式」。
 3. 点击「加载已解压的扩展程序」，选择直接包含 `manifest.json` 的文件夹。
 4. 打开哔哩哔哩或 YouTube 视频，点击「句得」扩展。安装后请保留该文件夹。
