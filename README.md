@@ -65,4 +65,4 @@ Safari 扩展需要开发者签名和真机安装，目前没有 IPA 或 TestFli
 
 这是句得的下载发布仓库。扩展采用原生 HTML/CSS/JavaScript，源码随扩展 ZIP 提供，可直接查看；本地转写服务源码随独立 ZIP 提供。
 
-基于 [jackchen1220/youtube-digest](https://github.com/jackchen1220/youtube-digest) 修改，保留原项目 MIT 版权声明；第三方库许可随包提供。详见 [LICENSE](LICENSE)。
+本项目基于 [zarazhangrui/youtube-digest](https://github.com/zarazhangrui/youtube-digest) 二次开发，并针对双语字幕、词句收藏、复习与本地转写等功能进行了修改。项目遵循 MIT 许可证，第三方库许可随包提供。详见 [LICENSE](https://github.com/wuxinyu-web/jude/blob/main/LICENSE)。
