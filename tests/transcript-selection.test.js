@@ -833,3 +833,66 @@ test('Bilibili subtitle seeks start playback from paused or playing state', asyn
     assert.equal(video.currentTime,134);assert.equal(plays,1);assert.equal(video.paused,false);assert.equal(response.success,true);
   }
 });
+
+test('immersion follows enabled cues but respects manual scrolling, interaction and pause',()=>{
+ const src=fs.readFileSync(path.join(__dirname,'../sidepanel.js'),'utf8');
+ const fn=src.slice(src.indexOf('function highlightActiveEntry('),src.indexOf('\n/**',src.indexOf('function highlightActiveEntry(')));
+ let selection=false;const calls=[];const row={dataset:{seconds:'0'},classList:{contains:()=>true,add:()=>{},remove:()=>{}}};
+ const sandbox={document:{documentElement:{classList:{contains:()=>true}},getElementById:id=>id==='transcriptList'?{querySelectorAll:()=>[row]}:id==='explainModal'?null:{style:{}}},currentTranscriptSource:'native',currentTranscriptPartial:false,autoScrollEnabled:false,hasNonCollapsedTextSelection:()=>selection,scrollTranscriptEntry:(...args)=>calls.push(args)};
+ vm.createContext(sandbox);vm.runInContext(fn,sandbox);sandbox.highlightActiveEntry(1);assert.equal(calls.length,0);assert.equal(sandbox.autoScrollEnabled,false);sandbox.autoScrollEnabled=true;sandbox.highlightActiveEntry(1);sandbox.highlightActiveEntry(2);assert.equal(calls.length,2);assert.equal(sandbox.autoScrollEnabled,true);
+ selection=true;sandbox.highlightActiveEntry(3);assert.equal(calls.length,2);
+ selection=false;sandbox.highlightActiveEntry(4);assert.equal(calls.length,3);
+ sandbox.YTD_LEARNING_UI={isTranscriptInteracting:()=>true};sandbox.highlightActiveEntry(5);assert.equal(calls.length,3);
+ sandbox.YTD_LEARNING_UI.isTranscriptInteracting=()=>false;sandbox.highlightActiveEntry(6);assert.equal(calls.length,4);
+ sandbox.highlightActiveEntry(6,{allowImmersiveScroll:false});assert.equal(calls.length,4);
+ sandbox.highlightActiveEntry(7,{allowImmersiveScroll:true});assert.equal(calls.length,5);
+});
+
+test('layout failure cannot prevent subtitle playback and failed seek is visible',async()=>{
+ const fn=source.slice(source.indexOf('async function seekFromTranscriptEntryClick('),source.indexOf('\nfunction getDisplayedTranscriptRowText'));
+ const status={textContent:''},calls=[];
+ const sandbox={hasNonCollapsedTextSelection:()=>false,sentenceFollowSnapshot:()=>({}),transcriptSeekRevision:0,
+ document:{getElementById:()=>status},seekTo:async(s,o)=>{calls.push([s,o.play]);return false;},scrollTranscriptEntry:()=>{throw Error('layout');}};
+ vm.runInNewContext(fn,sandbox);await sandbox.seekFromTranscriptEntryClick({currentTarget:{matches:()=>true}},125);
+ assert.deepEqual(calls,[[125,true]]);assert.match(status.textContent,/未能跳转播放/);
+});
+
+
+test('explicit playback return closes saved-word interaction and selection before reading paused playback',async()=>{
+ const fn=source.slice(source.indexOf('async function returnToPlaybackPosition()'),source.indexOf('function startPlaybackTracking()'));
+ const calls=[],button={disabled:false},status={textContent:''};
+ const sandbox={currentVideoId:'v',digestGeneration:1,
+ document:{getElementById:id=>id==='returnToPlaybackBtn'?button:status},
+ YTD_LEARNING_UI:{immersiveClose:()=>calls.push('close lookup')},closeActiveExplanationModal:()=>calls.push('close explanation'),
+ window:{getSelection:()=>({removeAllRanges:()=>calls.push('clear selection')})},
+ playbackTrackingTick:async options=>{assert.equal(options.returnToPosition,true);calls.push('read position');return true;}};
+ vm.runInNewContext(fn,sandbox);await sandbox.returnToPlaybackPosition();
+ assert.deepEqual(calls,['close lookup','close explanation','clear selection','read position']);
+ assert.equal(button.disabled,false);assert.equal(status.textContent,'');
+});
+
+test('explicit return scrolls nearest ASR cue during silence without adding false highlight',async()=>{
+ const start=source.indexOf('async function playbackTrackingTick(');
+ const fn=source.slice(start,source.indexOf('\n/**',start));
+ const rows=[{dataset:{seconds:'720'}},{dataset:{seconds:'746'}}],calls=[];
+ const sandbox={embeddedPanel:false,currentVideoId:'v',digestGeneration:1,autoScrollEnabled:false,
+ chrome:{runtime:{sendMessage:async()=>({success:true,response:{hasVideo:true,currentTime:744,paused:true,videoId:'v'}})}},
+ document:{getElementById:()=>({style:{}}),dispatchEvent(){},querySelectorAll:()=>rows},
+ CustomEvent:class{},setTimeout,clearTimeout,highlightActiveEntry:(t,o)=>{assert.equal(o.allowImmersiveScroll,true);},
+ scrollToActiveEntry:()=>false,scrollTranscriptEntry:(row)=>{calls.push(row);return true;}};
+ vm.runInNewContext(fn,sandbox);assert.equal(await sandbox.playbackTrackingTick({returnToPosition:true}),true);
+ assert.equal(calls[0],rows[1]);assert.equal(sandbox.autoScrollEnabled,true);
+});
+
+
+test('study countdown explicitly displays seconds, rounds remaining upward and stops at zero',()=>{
+ const ui=fs.readFileSync(path.join(__dirname,'../lib/learning-ui.js'),'utf8');
+ const fn=ui.slice(ui.indexOf('  function formatStudyClock('),ui.indexOf('  function formatTime('));
+ const sandbox={};vm.runInNewContext(fn,sandbox);
+ assert.equal(sandbox.formatStudyClock(1200000,{remaining:true}),'0h 20m 00s');
+ assert.equal(sandbox.formatStudyClock(1199000,{remaining:true}),'0h 19m 59s');
+ assert.equal(sandbox.formatStudyClock(1,{remaining:true}),'0h 00m 01s');
+ assert.equal(sandbox.formatStudyClock(-1000,{remaining:true}),'0h 00m 00s');
+ assert.equal(sandbox.formatStudyClock(3661000),'1h 01m 01s');
+ assert.equal(sandbox.formatStudyClock(1999),'0h 00m 01s');
+});

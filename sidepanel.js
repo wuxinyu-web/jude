@@ -15,6 +15,8 @@ const debugLog = (...args) => {
 // ============================================================
 
 const embeddedPanel = /(?:^|[?&])embedded=1(?:&|$)/.test(globalThis.location?.search || "");
+const mobileEmbeddedPanel = /(?:^|[?&])mobile=1(?:&|$)/.test(globalThis.location?.search || "");
+document.documentElement?.toggleAttribute?.("data-mobile-embedded", mobileEmbeddedPanel);
 let embeddedHostTabId = null;
 if (embeddedPanel) chrome.tabs.getCurrent().then(tab=>{embeddedHostTabId=tab?.id;});
 
@@ -1315,11 +1317,17 @@ async function seekFromTranscriptEntryClick(event, seconds) {
     return;
   }
 
-  const clickedEntry = event.currentTarget;
-  if (clickedEntry?.matches?.(".transcript-entry")) scrollTranscriptEntry(clickedEntry, "instant");
+  const clickedEntry = event.currentTarget?.matches?.(".transcript-entry") ? event.currentTarget : event.target?.closest?.(".transcript-entry");
+  const status = document.getElementById("playbackPositionStatus");
+  if (status) status.textContent = "";
   const snapshot = sentenceFollowSnapshot();
   const request = ++transcriptSeekRevision;
-  const success = await seekTo(seconds, { play: true });
+  // Dispatch playback before touching scroll geometry: a layout failure must
+  // never swallow the actual video jump.
+  const pendingSeek = seekTo(seconds, { play: true });
+  try { if (clickedEntry?.matches?.(".transcript-entry")) scrollTranscriptEntry(clickedEntry, "instant"); } catch (_) {}
+  const success = await pendingSeek;
+  if (!success && status) status.textContent = "未能跳转播放，请刷新视频页面后重试。";
   if (!success || request !== transcriptSeekRevision ||
       snapshot.videoId !== currentVideoId || snapshot.generation !== digestGeneration ||
       snapshot.revision !== manualTranscriptScrollRevision || !transcriptTabIsActive()) return;
@@ -1669,7 +1677,10 @@ function switchTab(tabName) {
   }
 
   document.querySelectorAll(".tab").forEach((tab) => {
-    tab.classList.toggle("active", tab.dataset.tab === tabName);
+    const active = tab.dataset.tab === tabName;
+    tab.classList.toggle("active", active);
+    tab.setAttribute("aria-selected", String(active));
+    tab.tabIndex = active ? 0 : -1;
   });
 
   document.querySelectorAll(".tab-panel").forEach((panel) => {
@@ -1804,9 +1815,11 @@ async function seekTo(seconds, { play = false } = {}) {
     if (youtubeTabId) {
       try {
         const response = await chrome.tabs.sendMessage(youtubeTabId, payload);
-        if (!response?.success) return false;
-        debugLog("[YouTube Digest Panel] seekTo direct success");
-        return true;
+        if (response?.success) {
+          debugLog("[YouTube Digest Panel] seekTo direct success");
+          return true;
+        }
+        // A stale stored tab must not suppress the active-tab fallback.
       } catch (directErr) {
         debugLog(
           "[YouTube Digest Panel] Direct seekTo failed, falling back to relay:",
@@ -3563,6 +3576,10 @@ async function deleteNote(noteId) {
  */
 
 async function returnToPlaybackPosition() {
+  // Explicit return ends lookup/selection, including pinned cards after saving.
+  globalThis.YTD_LEARNING_UI?.immersiveClose?.();
+  closeActiveExplanationModal?.();
+  window.getSelection()?.removeAllRanges();
   const button = document.getElementById("returnToPlaybackBtn");
   const status = document.getElementById("playbackPositionStatus");
   const videoId = currentVideoId, generation = digestGeneration;
@@ -3646,11 +3663,20 @@ async function playbackTrackingTick({ returnToPosition = false, followSnapshot =
     if (followSnapshot && !canFollowAfterSentenceSave(followSnapshot)) return false;
     if (returnToPosition) autoScrollEnabled = true;
     document.dispatchEvent(new CustomEvent("ytdPlayback",{detail:{currentTime,videoId:currentVideoId,generation:digestGeneration}}));
-    highlightActiveEntry(currentTime);
+    highlightActiveEntry(currentTime, { allowImmersiveScroll: returnToPosition || result.response.paused === false });
     if (returnToPosition) {
       document.getElementById("followPlaybackBtn").style.display = "none";
       // Always recenter, even when paused on the already highlighted row.
-      return scrollToActiveEntry("instant");
+      if (scrollToActiveEntry("instant")) return true;
+      // Silence between ASR cues has no active highlight. Still navigate to
+      // the nearest available cue without claiming it is currently spoken.
+      const entries = [...document.querySelectorAll("#transcriptList .transcript-entry")];
+      const nearest = entries.reduce((best, entry) => {
+        const seconds = Number(entry.dataset.seconds);
+        if (!Number.isFinite(seconds)) return best;
+        return !best || Math.abs(seconds - currentTime) < Math.abs(Number(best.dataset.seconds) - currentTime) ? entry : best;
+      }, null);
+      return nearest ? scrollTranscriptEntry(nearest, "instant") : false;
     }
     return true;
   } catch (error) {
@@ -3684,7 +3710,7 @@ function scrollTranscriptEntry(activeEntry, behavior = "instant") {
     const toolbar = document.querySelector("#transcriptContent .sticky-control-row") || document.querySelector(".sticky-control-row");
     const english = activeEntry.querySelector(".transcript-original, .transcript-text") || activeEntry;
     const top = area.scrollTop + english.getBoundingClientRect().top - area.getBoundingClientRect().top - (toolbar?.getBoundingClientRect().height || 0) - 4;
-    area.scrollTo({ top: Math.max(0, top), behavior });
+    if (Math.abs(area.scrollTop - Math.max(0, top)) > 1) area.scrollTo({ top: Math.max(0, top), behavior });
   } else {
     activeEntry.scrollIntoView({ behavior, block: "center" });
   }
@@ -3697,7 +3723,7 @@ function scrollTranscriptEntry(activeEntry, behavior = "instant") {
  *
  * @param {number} currentSeconds - Current video playback time in seconds
  */
-function highlightActiveEntry(currentSeconds) {
+function highlightActiveEntry(currentSeconds, { allowImmersiveScroll = true } = {}) {
   const transcriptList = document.getElementById("transcriptList");
   if (!transcriptList) return;
 
@@ -3722,7 +3748,21 @@ function highlightActiveEntry(currentSeconds) {
   if(currentTranscriptPartial && currentTranscript?.length){const last=currentTranscript[currentTranscript.length-1];if(currentSeconds>=last.start+last.duration){entries.forEach(e=>e.classList.remove('active-playback'));return;}}
   if (!activeEntry) return;
 
-  // Skip if this entry is already highlighted (no DOM thrashing)
+  // Immersion stays anchored even within the same cue (translation reflow,
+  // resizing or a prior manual scroll can otherwise leave it below the top).
+  if (document.documentElement.classList.contains("immersive")) {
+    if (!activeEntry.classList.contains("active-playback")) {
+      entries.forEach((e) => e.classList.remove("active-playback"));
+      activeEntry.classList.add("active-playback");
+    }
+    if (autoScrollEnabled && allowImmersiveScroll && !hasNonCollapsedTextSelection() && !globalThis.YTD_LEARNING_UI?.isTranscriptInteracting?.() && !document.getElementById("explainModal")) {
+      autoScrollEnabled = true;
+      const button = document.getElementById("followPlaybackBtn");
+      if (button) button.style.display = "none";
+      scrollTranscriptEntry(activeEntry, "instant");
+    }
+    return;
+  }
   if (activeEntry.classList.contains("active-playback")) return;
 
   // Remove old highlight, add new one

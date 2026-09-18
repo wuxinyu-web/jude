@@ -154,7 +154,7 @@ test("collection goals use distinct newly saved IDs of the bound video; end pres
 });
 test("release contains Study instead of Ask and no web-search permission",()=>{
   const root=path.resolve(__dirname,"..");const manifest=JSON.parse(fs.readFileSync(path.join(root,"manifest.json")));
-  assert.match(manifest.name,/开发版/);assert.equal(manifest.version,"1.13.2");assert.equal(manifest.host_permissions.length,7);
+  assert.equal(manifest.name,"句得");assert.equal(manifest.version,"1.22.0");assert.equal(manifest.host_permissions.length,7);
   const html=fs.readFileSync(path.join(root,"sidepanel.html"),"utf8");assert.match(html,/data-tab="study"/);assert.doesNotMatch(html,/data-tab="ask"/);
   const bg=fs.readFileSync(path.join(root,"background.js"),"utf8");assert.doesNotMatch(bg,/action === "(?:askVideo|suggestVideoQuestions)"/);
   assert.equal(fs.existsSync(path.join(root,"prompts/ask.md")),false);
@@ -216,4 +216,12 @@ test("resume before deadline does not dismiss the future time prompt; legacy pos
 test("reopening the study panel preserves progress and requires explicit continuation",async()=>{
   const h=harness();await h.service.studyCommand({...input,command:"start"});await h.service.panelOpened({...input});let s=(await h.service.getStudy()).current;assert.equal(s.status,"paused");assert.equal(s.pauseReason,"restore");assert.equal(s.restorePlayback,false);
   await h.service.studyCommand({...input,command:"resume"});assert.equal((await h.service.getStudy()).current.status,"running");
+});
+
+test('automatic study is foreground-only, idempotent and preserves previous records',async()=>{
+ const h=harness();h.setEnv({foreground:false});await h.service.studyCommand({...input,command:'auto'});assert.equal((await h.service.getStudy()).current,null);
+ h.setEnv({foreground:true});await h.service.studyCommand({...input,command:'auto'});const first=(await h.service.getStudy()).current;
+ await h.service.studyCommand({...input,command:'auto'});assert.equal((await h.service.getStudy()).current.id,first.id);
+ await h.service.studyCommand({...input,command:'pause'});h.advance(1000);h.setEnv({foreground:false});await h.service.studyCommand({...input,command:'auto'});assert.equal((await h.service.getStudy()).current.status,'paused');
+ h.setEnv({foreground:true});await h.service.studyCommand({...input,command:'auto'});const data=(await h.service.exportStudy()).data;assert.equal(data.sessions.length,2);assert.equal(data.sessions[0].status,'ended');assert.equal(data.sessions[1].status,'running');
 });

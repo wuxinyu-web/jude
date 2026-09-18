@@ -6,7 +6,7 @@ import subprocess
 import sys
 import threading
 import unittest
-from server import Handler, Jobs, ThreadingHTTPServer, VIDEO, write_json
+from server import Handler, Jobs, ThreadingHTTPServer, VIDEO, model_ready, write_json
 
 class ServiceTest(unittest.TestCase):
     def setUp(self):
@@ -29,7 +29,15 @@ class ServiceTest(unittest.TestCase):
         self.assertEqual(self.request('GET','/health')[0],403)
         headers=self.auth();headers['Origin']='https://evil.example'
         self.assertEqual(self.request('GET','/health',headers=headers)[0],403)
-        code,raw=self.request('GET','/health',headers=self.auth());self.assertEqual(code,200);self.assertTrue(json.loads(raw)['ready'])
+        code,raw=self.request('GET','/health',headers=self.auth());self.assertEqual(code,200);data=json.loads(raw);self.assertTrue(data['ready']);self.assertEqual(data['backend'],'mlx');self.assertIn('windows-v1',data['capabilities'])
+
+    def test_windows_model_requires_all_local_files(self):
+        model=Path(self.temp.name)/'model';model.mkdir()
+        for name in ('config.json','model.bin','tokenizer.json','vocabulary.txt'):
+            (model/name).write_bytes(b'x')
+        self.assertTrue(model_ready(model,'faster-whisper'))
+        (model/'model.bin').unlink()
+        self.assertFalse(model_ready(model,'faster-whisper'))
     def test_host_and_preflight_are_restricted(self):
         headers=self.auth();headers['Host']='evil.example'
         self.assertEqual(self.request('GET','/health',headers=headers)[0],403)

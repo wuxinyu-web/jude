@@ -13,6 +13,14 @@
  * reading the page and making small visual changes.
  */
 
+// Content worlds are isolated, but their DOM is shared with other extensions.
+// Never reconcile/delete another installation's controls (including v1.3).
+const YTD_CONTENT_IDS = Object.freeze({
+  digest: `ytd-digest-button-${chrome.runtime.id}`,
+  note: `ytd-note-button-${chrome.runtime.id}`,
+  toast: `ytd-note-toast-${chrome.runtime.id}`,
+});
+
 const DEBUG = false;
 const debugLog = (...args) => {
   if (DEBUG) console.log(...args);
@@ -235,7 +243,7 @@ function findDigestButtonHost() {
 function createDigestButton() {
   const digestButton = document.createElement("button");
   let requiresPageReload = false;
-  digestButton.id = "ytd-digest-button";
+  digestButton.id = YTD_CONTENT_IDS.digest;
   digestButton.type = "button";
   digestButton.setAttribute("aria-label", "打开英语学习侧栏");
   digestButton.innerHTML = `
@@ -328,7 +336,7 @@ function createDigestButton() {
  */
 function injectDigestButton() {
   const existingButtons = Array.from(
-    document.querySelectorAll("#ytd-digest-button"),
+    document.querySelectorAll(`#${YTD_CONTENT_IDS.digest}`),
   );
 
   if (!window.location.pathname.includes("/watch")) {
@@ -429,7 +437,7 @@ function injectNoteButton() {
   // Don't inject if button already exists and is properly tracked.
   // If a stale button exists (e.g., from a previous content-script instance),
   // remove it and re-inject so event listeners are attached to the live one.
-  const existingButton = document.getElementById("ytd-note-button");
+  const existingButton = document.getElementById(YTD_CONTENT_IDS.note);
   if (existingButton) {
     if (ytdNoteButton === existingButton && existingButton.isConnected) {
       return; // already injected and connected
@@ -464,7 +472,7 @@ function injectNoteButton() {
 
   // Create the note button — a soft rounded pill that floats over the player
   const noteButton = document.createElement("button");
-  noteButton.id = "ytd-note-button";
+  noteButton.id = YTD_CONTENT_IDS.note;
   noteButton.innerHTML = `
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" style="margin-right: 7px;">
       <path d="M12 20h9"></path>
@@ -663,11 +671,11 @@ async function saveCurrentNote() {
  */
 function showNoteSavedToast(note) {
   // Remove existing toast
-  const existing = document.getElementById("ytd-note-toast");
+  const existing = document.getElementById(YTD_CONTENT_IDS.toast);
   if (existing) existing.remove();
 
   const toast = document.createElement("div");
-  toast.id = "ytd-note-toast";
+  toast.id = YTD_CONTENT_IDS.toast;
   toast.innerHTML = `
     <div style="font-weight: 700; margin-bottom: 6px; color: #c8674f;">📝 笔记已保存</div>
     <div style="font-size: 12px; color: #6b6258; margin-bottom: 8px;">${escapeHtmlForContent(note.timestamp)} — ${escapeHtmlForContent(note.videoTitle)}</div>
@@ -733,7 +741,7 @@ function showNoteSavedToast(note) {
 function extractVideoInfo() {
   // The video title is in an h1 element inside the #title container
   const titleElement = document.querySelector(
-    "h1.ytd-watch-metadata yt-formatted-string, #title h1 yt-formatted-string",
+    "h1.ytd-watch-metadata yt-formatted-string, #title h1 yt-formatted-string, ytm-slim-video-metadata-renderer h1, ytm-slim-video-metadata-renderer h2",
   );
 
   // The channel name is in the channel info section
@@ -753,7 +761,7 @@ function extractVideoInfo() {
   );
 
   return {
-    title: titleElement?.textContent?.trim() || "",
+    title: titleElement?.textContent?.trim() || (document.title || "").replace(/ - YouTube$/, ""),
     channelName: channelElement?.textContent?.trim() || "",
     duration: videoElement?.duration || 0,
     description: descriptionElement?.textContent?.trim() || "",
@@ -835,7 +843,7 @@ document.addEventListener("yt-navigate-finish", () => {
 
   // Remove old buttons (they will be re-injected for the new video)
   document
-    .querySelectorAll("#ytd-digest-button")
+    .querySelectorAll(`#${YTD_CONTENT_IDS.digest}`)
     .forEach((button) => button.remove());
   ytdDigestButton = null;
   if (digestButtonReconcileTimer) {
@@ -843,7 +851,7 @@ document.addEventListener("yt-navigate-finish", () => {
     digestButtonReconcileTimer = null;
   }
 
-  const existingNoteButton = document.getElementById("ytd-note-button");
+  const existingNoteButton = document.getElementById(YTD_CONTENT_IDS.note);
   if (existingNoteButton) existingNoteButton.remove();
 
   // Reset note button state
@@ -856,7 +864,7 @@ document.addEventListener("yt-navigate-finish", () => {
   }
 
   // Remove any toasts
-  const existingToast = document.getElementById("ytd-note-toast");
+  const existingToast = document.getElementById(YTD_CONTENT_IDS.toast);
   if (existingToast) existingToast.remove();
 
   // Re-inject buttons for the new video (with a small delay for YouTube to render)

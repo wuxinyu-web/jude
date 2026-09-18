@@ -81,6 +81,16 @@ test("the panel body stays fixed while tab content owns vertical scrolling", () 
   assert.match(contentBlock, /overflow-y:\s*auto;/);
 });
 
+test("parent mode explains its purpose before password setup", () => {
+  const ui = read("lib/challenge-ui.js");
+
+  assert.match(ui, /防止孩子只追剧、不完成英语学习/);
+  assert.match(ui, /每集需要边看边收藏 10 个单词和 5 个长难句/);
+  assert.match(ui, /收藏或观看未达标时，必须通过本集测试才能继续下一集/);
+  assert.match(ui, /家长密码只用于解除模式，请由家长保管/);
+  assert.match(ui, /查看任务与测试规则/);
+});
+
 test("runtime has no source-file credential dependency or retired model", () => {
   const runtime = [
     "background.js",

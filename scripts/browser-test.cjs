@@ -59,8 +59,36 @@ function attachClient(rootSession,sessionId){
     const video=await context.newPage();
     for(const p of context.pages())if(p.url().includes('options.html'))await p.close();
     await video.goto(bili?'https://www.bilibili.com/video/BV1xx411c7mD/?p=2':'https://www.youtube.com/watch?v=abcDEF12345');
+    if(!bili){
+      // Legacy v1.3's isolated script can see/delete DOM nodes belonging to
+      // Jude. Reproduce its ownership assumption with real MutationObserver.
+      // Cap writes so a regression fails instead of freezing the test browser.
+      const coexistence=await video.evaluate(async extensionId=>{
+        let note,writes=0,observer;
+        const ensureNote=()=>{
+          const existing=document.getElementById('ytd-note-button');
+          if(existing===note&&note?.isConnected)return;
+          if(++writes>40){observer?.disconnect();return;}
+          existing?.remove();note=document.createElement('button');note.id='ytd-note-button';
+          document.getElementById('movie_player').append(note);
+        };
+        ensureNote();
+        const original=note;
+        const digest=document.createElement('button');digest.id='ytd-digest-button';
+        document.querySelector('#top-level-buttons-computed').append(digest);
+        observer=new MutationObserver(()=>{if(!note?.isConnected)ensureNote();});
+        observer.observe(document.body,{childList:true,subtree:true});
+        await new Promise(resolve=>setTimeout(resolve,300));
+        const result={writes,legacyNote:original.isConnected,legacyDigest:digest.isConnected,
+          judeNote:!!document.getElementById('ytd-note-button-'+extensionId),
+          judeDigest:!!document.getElementById('ytd-digest-button-'+extensionId)};
+        observer.disconnect();note?.remove();digest.remove();return result;
+      },extensionId);
+      assert.deepEqual(coexistence,{writes:1,legacyNote:true,legacyDigest:true,judeNote:true,judeDigest:true});
+      console.log('PASS: legacy/Jude controls coexist; browser event loop stays responsive');
+    }
     if(process.env.YTD_TEST_SEGMENTS==='1')await worker.evaluate(async()=>{const [tab]=await chrome.tabs.query({active:true,lastFocusedWindow:true});await chrome.scripting.executeScript({target:{tabId:tab.id},func:()=>{Object.defineProperty(document.querySelector('video'),'duration',{get:()=>29344,configurable:true});Object.defineProperty(document.querySelector('video'),'currentTime',{get:()=>14500,configurable:true});}});});
-    await video.locator('#ytd-digest-button').click({timeout:12000});
+    await video.locator(bili ? '#ytd-digest-button' : `#ytd-digest-button-${extensionId}`).click({timeout:12000});
     const cdp=await context.newCDPSession(video);let target;
     await until(async()=>{target=(await cdp.send('Target.getTargets')).targetInfos.find(t=>t.url===`chrome-extension://${extensionId}/sidepanel.html`);return !!target;},'side panel target');
     const {sessionId}=await cdp.send('Target.attachToTarget',{targetId:target.targetId,flatten:false});panel=attachClient(cdp,sessionId);
@@ -190,7 +218,7 @@ function attachClient(rootSession,sessionId){
       await panel.click('#studyPanel button','结束并总结');await until(()=>panel.evaluate(()=>document.getElementById('studyStatus').textContent.includes('部分目标未达标')),'honest early summary');await panel.screenshot('study-02-summary.png');
       const before=await get();await panel.click('#studyPanel button','继续上次学习');await until(async()=>(await get()).status==='running','continue ended task');assert.equal((await get()).id,before.id);
       await video.reload();await until(async()=>(await get()).status==='paused','refresh requires explicit resume');assert.equal((await get()).practicedWordIds.length,1);assert.ok((await get()).position>=before.position && (await get()).position<before.position+2,'refresh retains playhead including final live frame');
-      await video.locator('#ytd-digest-button').click();let reopened;await until(async()=>{reopened=(await cdp.send('Target.getTargets')).targetInfos.find(t=>t.url===`chrome-extension://${extensionId}/sidepanel.html`);return !!reopened;},'reopened study panel');
+      await video.locator(bili ? '#ytd-digest-button' : `#ytd-digest-button-${extensionId}`).click();let reopened;await until(async()=>{reopened=(await cdp.send('Target.getTargets')).targetInfos.find(t=>t.url===`chrome-extension://${extensionId}/sidepanel.html`);return !!reopened;},'reopened study panel');
       if(reopened.targetId!==target.targetId){const a=await cdp.send('Target.attachToTarget',{targetId:reopened.targetId,flatten:false});panel=attachClient(cdp,a.sessionId);await panel.send('Runtime.enable');await panel.send('Page.enable');}
       await panel.send('Emulation.setDeviceMetricsOverride',{width:320,height:700,deviceScaleFactor:1,mobile:false});
       await until(()=>panel.evaluate(()=>document.querySelectorAll('.transcript-text').length>=2),'reloaded captions');await panel.click('[data-tab="study"]');await until(()=>panel.evaluate(()=>document.getElementById('studyStatus').textContent.includes('已暂停')),'restored UI');
@@ -392,7 +420,7 @@ function attachClient(rootSession,sessionId){
     assert.ok(afterBackground-beforeBackground<=2100,'background playback does not keep accumulating');
     await backgroundTab.close();await video.bringToFront();
     // Switching away may close the native side panel. Reopen and reattach it.
-    await video.locator('#ytd-digest-button').click();
+    await video.locator(bili ? '#ytd-digest-button' : `#ytd-digest-button-${extensionId}`).click();
     let reopened;await until(async()=>{reopened=(await cdp.send('Target.getTargets')).targetInfos.find(t=>t.url===`chrome-extension://${extensionId}/sidepanel.html`);return !!reopened;},'reopened panel');
     if(reopened.targetId!==target.targetId){const a=await cdp.send('Target.attachToTarget',{targetId:reopened.targetId,flatten:false});panel=attachClient(cdp,a.sessionId);await panel.send('Runtime.enable');await panel.send('Page.enable');await panel.send('Emulation.setDeviceMetricsOverride',{width:420,height:900,deviceScaleFactor:1,mobile:false});}
     await until(()=>panel.evaluate(()=>document.querySelectorAll('.transcript-text').length>=2),'reopened transcript');

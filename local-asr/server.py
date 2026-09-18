@@ -19,6 +19,39 @@ JOB = re.compile(r'[0-9a-f]{32}\Z')
 TERMINAL = {'completed', 'failed', 'cancelled'}
 MAX_BODY = 4096
 
+
+def process_group_options():
+    if os.name == 'nt':
+        return {'creationflags': subprocess.CREATE_NEW_PROCESS_GROUP}
+    return {'start_new_session': True}
+
+
+def terminate_process_tree(proc):
+    if proc.poll() is not None:
+        return
+    if os.name == 'nt':
+        subprocess.run(['taskkill', '/PID', str(proc.pid), '/T', '/F'],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+        try:
+            proc.wait(timeout=4)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=4)
+        return
+    os.killpg(proc.pid, signal.SIGTERM)
+    try:
+        proc.wait(timeout=4)
+    except subprocess.TimeoutExpired:
+        os.killpg(proc.pid, signal.SIGKILL)
+        proc.wait(timeout=4)
+
+
+def model_ready(model, engine):
+    path = Path(model)
+    if engine == 'faster-whisper':
+        return all((path / name).is_file() for name in ('config.json', 'model.bin', 'tokenizer.json', 'vocabulary.txt'))
+    return (path / 'config.json').is_file() and (path / 'weights.npz').is_file()
+
 def validate_range(value):
     if value is None:
         return None
@@ -41,9 +74,10 @@ def write_json(path, data):
     tmp.replace(path)
 
 class Jobs:
-    def __init__(self, root, model):
+    def __init__(self, root, model, engine='mlx'):
         self.root = root
         self.model = model
+        self.engine = engine
         self.lock = threading.Lock()
         self.processes = {}
         root.mkdir(parents=True, exist_ok=True)
@@ -83,7 +117,8 @@ class Jobs:
             log = (folder / 'worker.log').open('wb')
             try:
                 proc = subprocess.Popen([sys.executable, str(Path(__file__).with_name('worker.py')),
-                    '--folder', str(folder), '--model', self.model], stdout=log, stderr=log, start_new_session=True)
+                    '--folder', str(folder), '--model', self.model, '--engine', self.engine],
+                    stdout=log, stderr=log, **process_group_options())
             finally:
                 log.close()
             self.processes[job_id] = proc
@@ -111,12 +146,7 @@ class Jobs:
                 return status
             proc = self.processes.get(job_id)
             if proc and proc.poll() is None:
-                os.killpg(proc.pid, signal.SIGTERM)
-                try:
-                    proc.wait(timeout=4)
-                except subprocess.TimeoutExpired:
-                    os.killpg(proc.pid, signal.SIGKILL)
-                    proc.wait(timeout=4)
+                terminate_process_tree(proc)
             status.update(status='cancelled', message='已取消；已生成的英文、原字幕和收藏均保留。')
             write_json(self.root / job_id / 'status.json', status)
             # Only remove this service's own temporary downloaded audio.
@@ -166,7 +196,9 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(403, {'error':'只允许配置中的学习扩展访问。'})
         try:
             if self.path == '/health':
-                return self.reply(200, {'ready':True,'engine':'Whisper 本地英文转写','modelReady':Path(self.server.jobs.model).is_dir(),'capabilities':['segments-v1','episodes-v1']})
+                return self.reply(200, {'ready':True,'engine':'Whisper 本地英文转写',
+                    'backend':self.server.jobs.engine,'modelReady':model_ready(self.server.jobs.model, self.server.jobs.engine),
+                    'capabilities':['segments-v1','episodes-v1','windows-v1']})
             if self.path.startswith('/jobs/'):
                 return self.reply(200, self.server.jobs.get(self.path[6:]))
             self.reply(404, {'error':'接口不存在。'})
@@ -205,14 +237,18 @@ def main():
     ids = config['extensionIds']
     if any(not re.fullmatch('[a-p]{32}', x) for x in ids):
         raise SystemExit('扩展 ID 无效。')
+    engine = config.get('engine', 'mlx')
+    if engine not in {'mlx', 'faster-whisper'}:
+        raise SystemExit('本地转写引擎配置无效，请重新运行安装器。')
     server = ThreadingHTTPServer(('127.0.0.1', 8766), Handler)
     server.origins = {'chrome-extension://' + x for x in ids}
-    server.jobs = Jobs(args.config.parent / 'jobs', config['model'])
+    server.jobs = Jobs(args.config.parent / 'jobs', config['model'], engine)
     print('本地原声转写服务已启动：127.0.0.1:8766。返回扩展点击「转写英文原声」。', flush=True)
     def stop(_signum, _frame):
         raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, stop)
-    signal.signal(signal.SIGHUP, stop)
+    if hasattr(signal, 'SIGHUP'):
+        signal.signal(signal.SIGHUP, stop)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

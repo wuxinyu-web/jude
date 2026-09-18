@@ -19,9 +19,10 @@ test("handout is real A4 OOXML with CJK font, safe hyperlinks, page fields and u
 });
 test("self-test has matching question/answer numbers and starts answers on a new page",async()=>{
   const xml=unzip(await D.Packer.toBuffer(W.buildDocument([word,sentence],{mode:"quiz"})))["word/document.xml"];
-  const answerAt=xml.indexOf("参考答案"),meaningAt=xml.indexOf("看法");assert.ok(answerAt>0&&meaningAt>answerAt);
+  const answerAt=xml.indexOf("参考答案"),meaningAt=xml.indexOf("看法");assert.ok(answerAt>0&&meaningAt<answerAt);
   assert.match(xml.slice(answerAt-350,answerAt),/pageBreakBefore/);
-  assert.equal((xml.match(/1  perspective/g)||[]).length,2);assert.equal((xml.match(/2  The book/g)||[]).length,2);assert.match(xml,/_{20}/);
+  const questions=xml.slice(0,answerAt);assert.match(questions,/她推荐的那本书改变了我的看法/);assert.doesNotMatch(questions,/perspective|The book|A book|English learning/);
+  assert.equal((xml.match(/1  perspective/g)||[]).length,1);assert.equal((xml.match(/2  The book/g)||[]).length,1);assert.match(xml,/_{20}/);
 });
 test("unfinished analysis is explicit, arbitrary source fields are excluded and XML text is escaped",async()=>{
   const xml=unzip(await D.Packer.toBuffer(W.buildDocument([{...sentence,term:"If A < B & C",analysisStatus:"error",apiKey:"NOT_FOR_EXPORT"}])))["word/document.xml"];
@@ -33,4 +34,23 @@ test('Bilibili handout and quiz source links preserve part and timestamp',async(
     assert.match(files['word/_rels/document.xml.rels'],/https:\/\/www.bilibili.com\/video\/BV1xx411c7mD\/\?p=2&amp;t=62/);
     assert.doesNotMatch(files['word/_rels/document.xml.rels'],/youtube.com/);
   }
+});
+
+test("quiz missing Chinese prompts stays explicit without exposing English answers",async()=>{
+ const xml=unzip(await D.Packer.toBuffer(W.buildDocument([{...word,meaningZh:""},{...sentence,translationZh:"",analysisStatus:"error"}],{mode:"quiz"})))["word/document.xml"];
+ const questions=xml.slice(0,xml.indexOf("参考答案"));assert.equal((questions.match(/中文题目尚未准备好/g)||[]).length,2);assert.doesNotMatch(questions,/perspective|The book/);assert.match(xml.slice(xml.indexOf("参考答案")),/perspective/);
+});
+
+test('combined export retains the complete handout then separates Chinese questions and answers onto new pages',async()=>{
+ const xml=unzip(await D.Packer.toBuffer(W.buildDocument([word,sentence],{mode:'handout-quiz'})))['word/document.xml'];
+ const testAt=xml.indexOf('词句测试题'),answerAt=xml.indexOf('参考答案</w:t>');
+ assert.ok(testAt>xml.indexOf('结构拆解'));assert.ok(answerAt>testAt);
+ assert.match(xml.slice(testAt-350,testAt),/pageBreakBefore/);assert.match(xml.slice(answerAt-350,answerAt),/pageBreakBefore/);
+ const questions=xml.slice(testAt,answerAt-350);assert.match(questions,/她推荐的那本书/);assert.doesNotMatch(questions,/perspective|The book/);
+ assert.equal((xml.match(/1  perspective/g)||[]).length,2);
+ const pure=unzip(await D.Packer.toBuffer(W.buildDocument([word,sentence],{mode:'handout'})))['word/document.xml'];assert.doesNotMatch(pure,/词句测试题|参考答案/);
+});
+test('combined export filters unsuitable test material while preserving handout and numbering safe answers',async()=>{
+ const xml=unzip(await D.Packer.toBuffer(W.buildDocument([{...word,term:'fuck'},sentence],{mode:'handout-quiz'})))['word/document.xml'];
+ const testAt=xml.indexOf('词句测试题');assert.match(xml.slice(0,testAt),/fuck/);assert.doesNotMatch(xml.slice(testAt),/fuck/);assert.match(xml.slice(testAt),/共 1 题/);assert.match(xml.slice(testAt),/1  The book/);
 });

@@ -3,13 +3,13 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>视频英语学习</title>
+    <title>句得</title>
     <link rel="stylesheet" href="sidepanel.css" />
     <link rel="stylesheet" href="lib/learning.css" />
   </head>
   <body>
     <!-- HEADER -->
-    <!-- Note: the panel's own "视频英语学习" title is shown by Chrome's side-panel
+    <!-- Note: the panel's own "句得" title is shown by Chrome's side-panel
          title bar, so we don't repeat a logo here. -->
     <div class="header">
       <div class="header-top">
@@ -31,16 +31,16 @@
       </div>
 
       <!-- Tab navigation -->
-      <div class="tabs" id="tabsNav" style="display: none">
-        <button class="tab active" data-tab="transcript">字幕</button>
-        <button class="tab" data-tab="overview">概览</button>
-        <button class="tab" data-tab="library">收藏库</button>
-        <button class="tab" data-tab="study">学习</button>
+      <div class="tabs" id="tabsNav" role="tablist" aria-label="学习内容" style="display: none">
+        <button class="tab active" id="tab-transcript" type="button" role="tab" data-tab="transcript" aria-controls="panel-transcript" aria-selected="true">字幕</button>
+        <button class="tab" id="tab-overview" type="button" role="tab" data-tab="overview" aria-controls="panel-overview" aria-selected="false" tabindex="-1">概览</button>
+        <button class="tab" id="tab-library" type="button" role="tab" data-tab="library" aria-controls="panel-library" aria-selected="false" tabindex="-1">收藏库</button>
+        <button class="tab" id="tab-study" type="button" role="tab" data-tab="study" aria-controls="panel-study" aria-selected="false" tabindex="-1">学习</button>
       </div>
     </div>
 
     <!-- MAIN CONTENT -->
-    <div class="content" id="contentArea">
+    <main class="content" id="contentArea">
       <section id="localAsrPanel" class="local-asr-panel" hidden aria-label="英文原声转写">
         <div class="learning-actions">
           <button class="learning-button" id="localAsrStart" type="button">转写英文原声</button>
@@ -54,14 +54,14 @@
       </section>
       <!-- WELCOME STATE -->
       <div id="welcomeState" class="welcome-container">
-        <div class="welcome-icon">&#9655;</div>
+        <div class="welcome-icon" aria-hidden="true">&#9655;</div>
         <div class="welcome-title">开始视频学习</div>
         <div class="welcome-desc">打开哔哩哔哩或 YouTube 视频，点击「英语学习」或扩展图标，开始阅读字幕。</div>
       </div>
 
       <!-- LOADING STATE -->
       <div id="loadingState" style="display: none">
-        <div class="loading-container">
+        <div class="loading-container" role="status" aria-live="polite">
           <div class="loading-bar"></div>
           <div class="loading-text" id="loadingText">正在获取字幕</div>
           <div class="loading-subtext" id="loadingSubtext">正在读取视频字幕…</div>
@@ -71,17 +71,17 @@
       <!-- ERROR STATE -->
       <div id="errorState" style="display: none">
         <div class="error-container">
-          <div class="error-icon">&#9888;</div>
+          <div class="error-icon" aria-hidden="true">&#9888;</div>
           <div class="error-title" id="errorTitle">出错了</div>
           <div class="error-message" id="errorMessage">操作未完成，请重试。</div>
-          <button class="error-btn" id="errorBtn">重试</button>
+          <button class="error-btn" id="errorBtn" type="button">重试</button>
         </div>
       </div>
 
       <!-- RESULTS -->
       <div id="resultsState" style="display: none">
         <!-- TAB: Transcript (default - no LLM required) -->
-        <div class="tab-panel active" data-panel="transcript">
+        <div class="tab-panel active" id="panel-transcript" role="tabpanel" aria-labelledby="tab-transcript" data-panel="transcript">
           <div class="section">
             <div class="section-title">完整字幕</div>
             <div class="sticky-control-row">
@@ -116,7 +116,7 @@
                 ></span>
               </div>
               <div class="transcript-actions">
-                <button class="enhance-btn" id="returnToPlaybackBtn" aria-label="回到播放位置" type="button" title="定位到当前视频时间对应的字幕，暂停时也可使用">回到播放位置</button>
+                <button class="enhance-btn" id="returnToPlaybackBtn" aria-label="跟随播放" type="button" title="定位到当前视频时间对应的字幕，暂停时也可使用">跟随播放</button>
                 <button class="enhance-btn" id="copyTranscriptBtn">复制</button>
                 <button class="enhance-btn" id="exportTranscriptBtn">导出</button>
               </div>
@@ -128,9 +128,10 @@
                 <input
                   id="transcriptSearchInput"
                   type="search"
+                  name="transcript-search"
                   maxlength="200"
                   autocomplete="off"
-                  placeholder="搜索字幕"
+                  placeholder="搜索字幕…"
                 />
                 <button
                   class="transcript-search-clear"
@@ -165,7 +166,7 @@
         </div>
 
         <!-- TAB: Overview (chapters + key quotes) - requires LLM -->
-        <div class="tab-panel" data-panel="overview">
+        <div class="tab-panel" id="panel-overview" role="tabpanel" aria-labelledby="tab-overview" data-panel="overview">
           <div class="sticky-control-row overview-control-row">
             <div
               class="transcript-mode-control"
@@ -241,7 +242,7 @@
         </div>
 
         <!-- TAB: Library -->
-        <div class="tab-panel" data-panel="library">
+        <div class="tab-panel" id="panel-library" role="tabpanel" aria-labelledby="tab-library" data-panel="library">
           <div class="library-switch" role="group" aria-label="收藏类别">
             <button
               class="library-switch-btn"
@@ -295,25 +296,28 @@
           </div>
         </div>
 
-        <div class="tab-panel" data-panel="study" id="studyPanel"></div>
+        <div class="tab-panel" data-panel="study" id="panel-study" role="tabpanel" aria-labelledby="tab-study"><div class="study-parent-entry"><button type="button" id="parentModeToggle" class="settings-btn parent-toggle" role="switch" aria-checked="false" aria-label="家长模式" title="开启或解除家长模式">家长模式<span aria-hidden="true">关</span></button></div><section id="challengePanel"></section><div id="studyPanel"></div></div>
 
       </div>
-    </div>
+    </main>
 
     <!-- Auto-scroll follow button — appears when user scrolls away from playback position -->
     <button
       class="follow-playback-btn"
       id="followPlaybackBtn"
       style="display: none"
-    >回到播放位置</button>
+    >跟随播放</button>
 
     <script src="lib/platform.js"></script>
     <script src="settings.js"></script>
     <script src="lib/learning-core.js"></script>
     <script src="vendor/docx.umd.js"></script>
+    <script src="lib/challenge-core.js"></script>
+    <script src="lib/excel-export.js"></script>
     <script src="lib/word-export.js"></script>
     <script src="sidepanel.js"></script>
     <script src="lib/learning-ui.js"></script>
+    <script src="lib/challenge-ui.js"></script>
     <script src="lib/local-asr.js"></script>
       <script src="lib/layout-ui.js"></script>
     <script src="lib/immersive.js"></script>

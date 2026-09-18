@@ -22,11 +22,13 @@ lib/study-content.js is the sole playback sample producer (one second plus playb
 
 markReview validates foreground/session/video/tab binding before counting session practice. IDs are unique by kind; repeated self-assessment updates the latest pending state. exportStudy excludes internal worker/document/tab fields; clearStudy only clears the session store and reverses active distraction controls. The library review map, Notes and Vocabulary remain separate.
 
-## UI and Word
+## UI and local document export
 
 lib/learning-ui.js uses a narrow YTD_PANEL bridge, event delegation and generation checks for hover and selections. Original-language text is extracted from DOM ranges rather than including timestamp/translation/action text. Cards render provider data as text. Multi-label grouping may duplicate display cards; selected/exported IDs are deduplicated.
 
 lib/word-export.js is shared by browser download and Node tests. vendor/docx.umd.js is the pinned 9.6.1 browser build; refresh with npm run vendor:docx. It writes A4 portrait OOXML with CJK font, safe source links, page fields, and separate self-test answers. Exports receive only selected content fields. npm run package includes all runtime modules, prompt contracts and vendor license through an explicit allowlist.
+
+lib/excel-export.js is a local, dependency-free XLSX writer shared by browser download and Node tests. Library export emits exactly two sheets, 生词 and 长难句, with the shared columns 单词、音标、释义、例句; sentence phonetics are deliberately blank. Text is written as inline strings rather than formulas, and only allowlisted collection fields are read. On coarse-pointer devices learning-ui first offers the generated file through the system share sheet, then falls back to a normal download.
 
 ## Transcript search and reading position
 
@@ -45,7 +47,9 @@ Content playback heartbeats run each second; side-panel rendering polls every 50
 
 ## 1.6 Local original-audio ASR
 
-`lib/local-asr.js` owns the side-panel job controls and strict result validation. Its loopback HTTP requests communicate with the separately started `local-asr/server.py`. Only video identities cross that boundary. The local worker downloads public Bilibili audio and runs MLX Whisper with `task=transcribe, language=en`; it never receives source Chinese captions as model input. Processing progress is persistent, cancellation terminates the process group, and incomplete jobs are marked failed after restart. The panel stores job IDs to resume observation without requiring the side panel to stay open.
+`lib/local-asr.js` owns the side-panel job controls and strict result validation. Its loopback HTTP requests communicate with the separately started `local-asr/server.py`. Only video identities cross that boundary. The local worker downloads public Bilibili audio and runs MLX Whisper on Apple Silicon or faster-whisper CPU int8 on 64-bit Windows, always with `task=transcribe, language=en`; it never receives source Chinese captions as model input. Processing progress is persistent, cancellation terminates the platform process tree, and incomplete jobs are marked failed after restart. The panel stores job IDs to resume observation without requiring the side panel to stay open.
+
+1.22.0 selects the ASR backend during installation and records it in the local config. Platform imports stay lazy so MLX is never required on Windows and CTranslate2 is never required on the Mac runtime. Windows uses an isolated `Scripts/python.exe`, a commit-pinned CTranslate2 `small.en` model whose main weight is checksum verified, `CREATE_NEW_PROCESS_GROUP`, and targeted `taskkill /T` cancellation. Health reports the backend and validates backend-specific model files while keeping the stable extension-facing engine name.
 
 Applying ASR validates the current video, increments digest/translation/analysis generations, clears translations derived from the old source, and stores a native subtitle backup in the same digest cache. Chinese source captions are aligned by overlapping time windows for bilingual viewing; they are never sent through a Chinese-to-Chinese translation pass. Restoring the native source invalidates the ASR-derived UI context in the same way. Closed/changed panels do not apply a stale job to another video.
 
@@ -114,3 +118,56 @@ Immersive row clicks position the clicked DOM row immediately, before the seek r
 Transcript row seeks request play=true; Bilibili acknowledges after play() resolves and reports failure if rejected. Scroll events only save reading position; explicit wheel/touch/keyboard/scrollbar input disables follow so translation reflow cannot stop playback tracking.
 
 Official Bilibili episodes use bili_ep<number> identities and ep source URLs. Season metadata resolves the exact episode aid/cid without falling back to the first episode. Signed player requests include ep_id/season_id. Local ASR accepts exact episode IDs and attempts public episode audio; access restrictions remain enforced.
+
+## 本集闯关学习（1.14.0）
+
+自由学习、原有计时、收藏、翻卡与 Word 导出继续保留。学习页新增可选闯关区：开始前告知出题与判题会使用配置的 DeepSeek API；仅从开始后本标签页在前台播放过的英文字幕出题，优先选用适合的收藏词，再补齐目标 8 道单词和 4 道常用短语题。中文题干填写英文，每类正确率至少 75%（向上取整）通关；素材不足则减少题数并明确告知，不冒充正式四级测评。生成的答案必须出现在所引字幕中，题面不得包含英文。
+
+未匹配预设答案的回答交给 DeepSeek 判断合理同义表达；不确定或服务失败时不计错，保存回答供重试或退出。首次成绩与错题补测分开，补测通过不意味着一次掌握。试卷成功生成后复用，重复点击合并请求；浏览器中断的请求可手动重试，服务端已经发生的费用不能保证退回。生成与判题中的退出/清空会使迟到结果失效。
+
+闯关只限制已加入任务的标签页内的后续视频播放：本集结束、测试中或切到其他视频时暂停并显示测试/退出入口。可以在学习页结束当前观看提前测试，因此它不是完整看完一集的证明。允许退出且记为未通关；不限制关闭插件、换浏览器或新标签页，不能作为防作弊或家长控制。刷新后保留进度并需手动继续；拖动、后台、缓冲、离线和休眠不补记播放片段。
+
+新增独立 ytd_challenges（schemaVersion 1），不改旧学习记录或收藏结构。试卷、答案、自评以外的客观练习结果、观看区间和作答仅存本机，保留 90 天（访问时清理），最多 200 次记录、每任务最多 30 次提交。原有“导出学习记录”包含闯关记录；确认清空会清理两类学习记录，但保留收藏与笔记。仅向 DeepSeek 发送选取的已观看字幕、候选收藏词、题目和待判回答，不发送其他视频或本地密钥。出题抽样最多 240 行，过长字幕提示使用较短单集。
+
+新增 challenge-core/worker/ui/content 模块。写操作串行化，AI 请求在队列外；题目生成、判分用任务 ID 与 revision 防迟到覆盖。新数据接口仅扩展页可调用，内容脚本只能发播放采样、主动退出及打开侧栏；播放采样结合真实发送标签页和活动窗口核对。试卷初次提交前不通过页面消息返回参考答案。浏览器本机数据不提供考试级保密。
+
+
+## 家长模式（1.15.0）
+
+原自由学习、收藏和普通闯关保留。家长在学习页选择“家长设置密钥”，抄下仅当次显示的 9 位数字，隐藏后重新输入确认启用。退出模式必须验证密钥；密钥不会再次显示，也没有免密解除入口。忘记密钥时不能通过本功能恢复，请妥善保存。
+
+- 同一浏览器中扩展支持的 Bilibili / YouTube 视频页面遵循家长任务，切换标签页不会直接解除。通过后，下一个未完成视频自动建立任务；已完成的视频可以回看。
+- 从启用本集任务后实际观看的英文字幕统计不同收藏项。收集 10 个单词、5 个句子并实际观看至少视频时长的 80% 可完成收集任务，记录不表示已掌握。收藏不足或观看不足则进入测试。未收藏也能从已观看字幕出题。
+- 本集结束或尝试进入其他视频时，字幕素材已就绪会自动准备试卷；可以提前选择“结束观看，准备测试”。失败后提供重试，不自动循环调用收费接口。
+- 家长试卷为 10 道单词中文提示默写英文（每题 0.5 分）和 5 道完整句子中译英（每题 1 分），满分 10 分，达到 8 分通过。模型优先挑选常用动词、形容词和四级及以上难度语料；这不是正式四级测评。语义相符的自然译法可以判对。
+- 题干、答案及来源例句继续规避色情、下流、脏话等。可靠安全素材不足 15 题时不按小卷放行，可回看、补齐英文字幕后重试或请家长解除；不编造台词凑题。
+- 未通过先逐项复习错题、自评记住，再重新作答整张试卷。整卷独立计分，首次成绩保留，不用历次正确答案累积凑够 8 分。参考原声回放限于错题对应片段。
+- 判题或出题服务失败不会记为答错或自动解锁，可重试或由家长解除。出题和必要判题使用现有已配置 AI 服务，可能产生费用；不新增账号、后台或第三方分析。
+- 密钥仅首次设置返回到家长界面，本机保存随机盐与 PBKDF2-SHA-256 校验值（210000 次），不保存明文；5 次错误后等待 60 秒。待确认密钥 10 分钟过期。校验信息不进入学习记录导出，保留到解除；学习记录依旧只存本机、保留 90 天。家长模式开启时，清空学习记录须先解除，不删除收藏。
+- 限制范围是扩展支持的此浏览器视频页，不是系统级控制。卸载/禁用扩展、清除扩展数据、使用其他浏览器或应用仍可绕过；本机数据并非防篡改证据，不能据此保证学生专注或掌握。
+
+家长模式入口（1.15.5）：仅在学习页右上角常驻显示开关，滚动时仍可见，默认不展示家长设置大卡片；开启与解除在密钥弹窗内完成，开关只反映已确认状态。取消弹窗不解除模式。普通闯关及观看中的家长任务使用轻量状态行，直接提供继续或开始测试操作；不再使用折叠任务框。测试和错题复习需要处理时展示。确认开启可结束现有普通闯关并保留记录。
+
+学习记录导出使用本机 XLSX 生成器，包含每日统计、学习任务、测试成绩及说明；不导出家长密钥。文本单元格不执行公式。
+
+## 1.16 简化学习页
+自由学习页面仅显示今日有效时长、复习收藏和学习记录。打开学习区后在前台视频上自动建立计时记录，暂停与后台仍不计观看时间；无手动任务目标要求。七日记录、Excel 导出和清空移入学习记录弹窗。普通闯关入口移除，旧闯关结束但保留成绩；本集限制仅在家长模式开启时显示。跨视频收藏可以复习，自评不虚增当前视频任务成果。
+
+## 1.16.1 家长密码与学习记录
+家长自行设置 6–64 位密码，重复输入确认后直接开启，无随机密钥展示步骤。仅保存加盐哈希，旧 9 位密钥仍可用于解除。学习记录弹窗恢复最近七天柱状图，点击日期显示观看、操作和复习时长，保留 Excel 导出。
+
+## 1.16.5 YouTube content-script coexistence
+
+Chrome isolates extension JavaScript globals but shares the page DOM. Legacy YouTube Digest v1.3 and Jude previously used identical note/action IDs, removed unrecognized nodes, and immediately reinserted their own note in a body MutationObserver. With both enabled this creates a microtask feedback loop that can starve page initialization and playback. YouTube action, note and toast IDs now include chrome.runtime.id; SPA cleanup selects only this installation's nodes. Immersion hides its namespaced note control as well as the existing Bilibili control. Storage keys, permissions, provider calls and learning behavior are unchanged.
+
+The coexistence regression fails on the old code and checks two isolated worlds against a shared DOM, including legacy v1.3, duplicate installations, stable reconciliation and SPA cleanup. The isolated browser integration also verifies bounded native MutationObserver writes and preservation of both installations' controls.
+
+### Vertical YouTube video visibility (1.16.6)
+
+YouTube may use a zero-height `.html5-video-container` with an absolutely positioned, pixel-sized video. Vertical layout supplies a definite wrapper height and resets video offsets via a removable stylesheet. Visibility suppression excludes the entire player subtree: native hidden overlays remain hidden. Closing removes the stylesheet and restores site-owned sizing without mutating inline video styles. `scripts/layout-visibility-browser-test.mjs` uses an isolated synthetic canvas video to check decoded frames, visible geometry, hidden overlays, multiple dock ratios, and restoration. No provider calls or user data are involved.
+
+### Safari mobile target (1.17.0)
+
+The audited Chrome release is staged by scripts/package-safari.cjs, which removes Chrome-only manifest fields, adds exact mobile origins, and supplies a Safari action popup and touch stylesheet. The source Chrome manifest stays unchanged except for version. generate-safari-ios.cjs invokes Apple's converter with copied resources and produces an unsigned iOS 18+ project without selecting a developer account.
+
+The layout worker capability-checks sidePanel. Safari's horizontal preference means the complete embedded panel (mode mobile), while immersive remains transcript-only. Height is stored independently as mobileHeight. Both use the existing authenticated extension iframe and retain the source video node; the same canonical mobile/desktop IDs preserve data identity. Touch lookup requires a short, stationary tap and a collapsed selection; scrolling/cancel/long native selections do not invoke word lookup. Local desktop ASR is explicitly unavailable in Safari and no loopback request is sent.

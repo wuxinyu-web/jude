@@ -1,0 +1,10 @@
+@media (pointer:coarse){
+  input,select,textarea{font-size:16px!important}
+  button,.tab{min-height:44px}
+  .content{padding-bottom:calc(16px + env(safe-area-inset-bottom))}
+  .transcript-original,.transcript-text{-webkit-user-select:text;user-select:text}
+  .learning-float{max-width:calc(100vw - 16px);max-height:70dvh;overflow:auto}
+  .learning-word-actions,.learning-actions{flex-wrap:wrap}
+  .library-excel-export{flex:1 0 100%;font-weight:700}
+  .header-top{flex-wrap:wrap}
+}

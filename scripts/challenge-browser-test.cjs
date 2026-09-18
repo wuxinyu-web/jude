@@ -1,0 +1,60 @@
+const {chromium}=require('playwright');
+const fs=require('fs'),path=require('path'),assert=require('node:assert/strict');
+const output=fs.mkdtempSync(path.join(require('os').tmpdir(),'jude-challenge-test-'));const root=process.cwd(),W=require(path.join(root,'lib/challenge-worker.js'));let t=10000000000,mockReply=null;const data={};const source=[{start:0,duration:5,text:'Your perspective can help us figure out the answer.'}];
+const service=W.create({storage:{get:async k=>({[k]:structuredClone(data[k])}),set:async x=>Object.assign(data,structuredClone(x))},now:()=>t,environment:async()=>({videoId:'BV1xx411c7mD',foreground:true}),loadPrompt:async()=>'',ai:async()=>({text:JSON.stringify(mockReply||{questions:[{kind:'word',prompt:'观点；看法',answer:'perspective',accepted:['viewpoint'],start:0},{kind:'phrase',prompt:'弄清楚',answer:'figure out',start:0}]})})});
+(async()=>{const browser=await chromium.launch({headless:true,...(process.env.YTD_TEST_CHROMIUM?{executablePath:process.env.YTD_TEST_CHROMIUM}:{})});try{const page=await browser.newPage({viewport:{width:360,height:850}});
+await page.exposeFunction('sendChallenge',async m=>{try{const v=m.action==='parentCommand'?await service.parentCommand(m):m.action==='challengeGet'?await service.get():m.action==='challengeCommand'?await service.command(m):m.action==='challengeGenerate'?await service.generate(m):await service.submit(m);return {success:true,...v};}catch(e){return {success:false,error:e.message};}});
+await page.setContent(`<style>${fs.readFileSync('lib/learning.css','utf8')}body{margin:0;background:#f7f4ed;font:15px/1.6 system-ui;color:#302c26}#studyPanel{padding:20px}</style><button id="parentModeToggle" class="settings-btn parent-toggle" style="display:flex;margin-left:auto" role="switch" aria-checked="false" aria-label="家长模式">家长模式<span>关</span></button><section id="challengePanel"></section><section id="studyPanel"><h2>本次自由学习任务</h2><button>开始学习</button></section>`);
+await page.evaluate(source=>{window.YTD_PANEL={context:()=>({videoId:'BV1xx411c7mD',videoTitle:'本集测试示例',tabId:1,language:'en'}),rawSegments:()=>source};window.chrome={runtime:{sendMessage:window.sendChallenge,onMessage:{addListener:()=>{}}}};},source);
+await page.addScriptTag({path:path.join(root,'lib/platform.js')});await page.addScriptTag({path:path.join(root,'lib/challenge-ui.js')});
+assert.equal(await page.locator('.parent-mode').count(),0);await page.getByRole('button',{name:'开始本集闯关',exact:true}).click();await page.getByText('观看中',{exact:true}).waitFor();
+for(let n=0;n<=4;n++){t+=1000;await service.pulse({documentId:'doc',position:n,playing:true,visible:true,online:true},1);}
+await page.getByRole('button',{name:'结束观看，准备测试'}).click();await page.getByPlaceholder('在这里填写英文').first().waitFor();
+assert.equal(await page.locator('#studyPanel').isVisible(),true);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+await page.screenshot({path:path.join(output,'quiz.png'),fullPage:true});
+await page.getByPlaceholder('在这里填写英文').nth(0).fill('viewpoint');await page.getByPlaceholder('在这里填写英文').nth(1).fill('figure out');await page.getByRole('button',{name:'提交本集测试',exact:true}).click();await page.getByText('本集已通关，可以继续下一集').waitFor();await page.screenshot({path:path.join(output,'passed.png'),fullPage:true});
+assert.equal((await service.get()).session.status,'passed');assert.equal((await service.get()).session.attempts.length,1);console.log('Browser UI: start, source, quiz, typed answers, submit, pass, original free panel and narrow overflow PASS');
+await page.getByRole('switch',{name:'家长模式',exact:true}).click();await page.getByRole('button',{name:'家长设置密钥',exact:true}).click();
+const pin=await page.locator('.parent-pin').innerText();assert.match(pin,/^\d{9}$/);
+await page.getByRole('button',{name:'已抄好，隐藏密钥',exact:true}).click();assert.equal(await page.locator('.parent-pin').count(),0);
+await page.getByLabel('确认 9 位密钥',{exact:true}).fill(pin);await page.getByRole('button',{name:'确认并开启家长模式',exact:true}).click();
+await page.waitForFunction(()=>document.getElementById('parentModeToggle').getAttribute('aria-checked')==='true');assert.equal(await page.locator('.parent-modal').count(),0);assert.equal(await page.locator('.challenge-compact').count(),0);assert.equal(await page.locator('#challengePanel.challenge-inline').count(),1);
+assert.equal(await page.getByRole('button',{name:'退出闯关，恢复自由观看',exact:true}).count(),0);
+assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+assert.equal(JSON.stringify(data).includes(pin),false);assert.equal((await page.locator('body').innerText()).includes(pin),false);
+await page.screenshot({path:path.join(output,'parent-active.png'),fullPage:true});
+await page.getByRole('switch',{name:'家长模式',exact:true}).click();await page.keyboard.press('Escape');assert.equal((await service.get()).parent.enabled,true);assert.equal(await page.locator('.parent-modal').count(),0);assert.equal(await page.getByRole('switch',{name:'家长模式',exact:true}).getAttribute('aria-checked'),'true');
+const words=['reliable','efficient','perspective','approach','consider','maintain','improve','confident','essential','accurate'];
+const parentCues=words.map((w,i)=>({start:i*5,duration:5,text:`We consider ${w} a useful expression for this lesson.`}));
+mockReply={questions:[...words.map((w,i)=>({kind:'word',prompt:`本集词汇中文释义第${i+1}项`,answer:w,start:i*5})),...parentCues.slice(0,5).map((c,i)=>({kind:'sentence',prompt:`根据本集语境翻译第${i+1}句话`,answer:c.text,start:c.start}))]};
+await page.evaluate(cues=>{window.YTD_PANEL.rawSegments=()=>cues;},parentCues);await page.evaluate(()=>YTD_CHALLENGE_UI.poll());
+for(let n=0;n<=49;n++){t+=1000;await service.pulse({documentId:'parent-doc',position:n,playing:true,visible:true,online:true,duration:50},1);}
+await page.getByRole('button',{name:'结束观看，准备测试',exact:true}).click();await page.locator('[data-question]').nth(14).waitFor();
+assert.equal(await page.locator('textarea[data-question]').count(),5);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+await page.screenshot({path:path.join(output,'parent-quiz.png'),fullPage:true});
+let questions=data.ytd_challenges.sessions.at(-1).questions;
+mockReply={results:questions.map(q=>({id:q.id,correct:false,feedback:'请回顾词义或句式。'}))};
+for(const input of await page.locator('[data-question]').all())await input.fill('wrong');
+await page.getByRole('button',{name:'提交本集测试',exact:true}).click();await page.getByRole('button',{name:'复习完成，重新考试',exact:true}).waitFor();
+for(let i=0;i<15;i++)await page.getByRole('button',{name:'记住了',exact:true}).first().click();
+await page.getByRole('button',{name:'复习完成，重新考试',exact:true}).click();await page.locator('[data-question]').nth(14).waitFor();
+assert.equal(await page.locator('details').filter({hasText:'查看参考答案与原声出处'}).count(),0);
+for(const q of questions)await page.locator(`[data-question="${q.id}"]`).fill(q.answer);
+await page.getByRole('button',{name:'提交本集测试',exact:true}).click();await page.getByText('本集已通关，可以继续下一集',{exact:true}).waitFor();
+assert.equal((await service.get()).session.score.points,10);assert.equal((await service.get()).session.attempts[0].score.points,0);
+console.log('Parent UI: full 15-question paper, five translation textareas, failed exam, required review, full retest and 10/10 pass PASS');
+
+await page.getByRole('switch',{name:'家长模式',exact:true}).click();await page.getByLabel('家长密钥',{exact:true}).fill('000000000');await page.getByRole('button',{name:'验证并解除',exact:true}).click();await page.getByText('密钥不正确。',{exact:true}).waitFor();assert.equal((await service.get()).parent.enabled,true);
+await page.getByLabel('家长密钥',{exact:true}).fill(pin);await page.getByRole('button',{name:'验证并解除',exact:true}).click();await page.waitForFunction(()=>document.getElementById('parentModeToggle').getAttribute('aria-checked')==='false');assert.equal((await service.get()).parent.enabled,false);assert.equal(await page.locator('.parent-modal').count(),0);
+console.log('Parent UI: one-time key, hide, confirmation, wrong-key rejection, unlock and narrow layout PASS; screenshots: '+output);
+// Exercise the actual content module with a mocked inaccessible video, no remote media.
+const gate=await browser.newPage({viewport:{width:700,height:550}});await gate.route('https://fixture.test/**',r=>r.fulfill({body:'<html></html>',contentType:'text/html'}));await gate.goto('https://fixture.test/');await gate.setContent('<video></video>');await gate.evaluate(()=>{window.YTD_PLATFORM={videoIdFromUrl:()=> 'other',sourceUrl:()=> 'https://www.bilibili.com/video/BV1xx411c7mD/'};window.pauses=0;document.querySelector('video').pause=()=>window.pauses++;window.chrome={runtime:{sendMessage:async m=>m.action==='challengePulse'?{success:true,gate:{id:'x',videoId:'original',status:'quiz',blocked:true}}:{success:true}}};});await gate.addScriptTag({path:path.join(root,'lib/challenge-content.js')});await gate.getByText('完成本集测试，再继续下一集').waitFor();assert.ok(await gate.evaluate(()=>window.pauses>0));gate.on('dialog',d=>d.accept());await gate.getByRole('button',{name:'退出闯关',exact:true}).click();await gate.locator('#jude-challenge-gate').waitFor({state:'detached'});console.log('Content gate: pause, visible recovery and exit PASS');
+await gate.evaluate(()=>{window.chrome.runtime.sendMessage=async m=>m.action==='challengePulse'?{success:true,gate:{id:'p',parentMode:true,videoId:'original',status:'quiz',blocked:true}}:{success:true};});
+await gate.addScriptTag({path:path.join(root,'lib/challenge-content.js')});await gate.getByRole('button',{name:'请家长解除',exact:true}).waitFor();
+assert.equal(await gate.getByRole('button',{name:'退出闯关',exact:true}).count(),0);
+await gate.getByRole('button',{name:'请家长解除',exact:true}).click();assert.equal(await gate.locator('#jude-challenge-gate').count(),1);
+await gate.evaluate(()=>{window.chrome.runtime.sendMessage=async()=>{throw Error('temporary service failure');};});
+await gate.evaluate(()=>document.querySelector('video').dispatchEvent(new Event('playing',{bubbles:true})));
+assert.equal(await gate.locator('#jude-challenge-gate').count(),1);console.log('Parent content gate: no password-free exit; request failure retains the gate PASS');
+
+}finally{await browser.close();}})().catch(e=>{console.error(e);process.exitCode=1;});

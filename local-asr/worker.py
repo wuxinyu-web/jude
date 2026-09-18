@@ -12,19 +12,52 @@ from server import read_json, write_json, VIDEO
 
 from audio_download import MAX_SECONDS, MAX_BYTES, TranscriptionError, download_audio
 
+ENGINES = {'mlx', 'faster-whisper'}
+
+
+def create_transcriber(engine, model_path):
+    """Return a normalized chunk transcriber without importing the other platform backend."""
+    if engine == 'mlx':
+        import mlx_whisper
+        def transcribe(audio):
+            result = mlx_whisper.transcribe(audio, path_or_hf_repo=model_path,
+                language='en', task='transcribe', temperature=0, condition_on_previous_text=False,
+                word_timestamps=True, verbose=None)
+            return result.get('segments', [])
+        return transcribe, 'MLX Whisper small.en'
+    if engine == 'faster-whisper':
+        from faster_whisper import WhisperModel
+        whisper = WhisperModel(model_path, device='cpu', compute_type='int8')
+        def transcribe(audio):
+            result, _info = whisper.transcribe(audio, language='en', task='transcribe',
+                beam_size=5, temperature=0, condition_on_previous_text=False,
+                word_timestamps=True, vad_filter=True)
+            return [dict(text=item.text, start=item.start, end=item.end,
+                no_speech_prob=item.no_speech_prob, avg_logprob=item.avg_logprob) for item in result]
+        return transcribe, 'faster-whisper small.en (CPU int8)'
+    raise ValueError('不支持的本地转写引擎。')
+
+
+def stop_when_parent_exits(parent):
+    while True:
+        time.sleep(2)
+        if os.getppid() == parent:
+            continue
+        if os.name == 'nt':
+            subprocess.run(['taskkill', '/PID', str(os.getpid()), '/T', '/F'],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+            os._exit(1)
+        os.killpg(os.getpgrp(), signal.SIGTERM)
+        return
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--folder', type=Path, required=True)
     parser.add_argument('--model', required=True)
+    parser.add_argument('--engine', choices=sorted(ENGINES), required=True)
     args = parser.parse_args()
     parent = os.getppid()
-    def watch_parent():
-        while True:
-            time.sleep(2)
-            if os.getppid() != parent:
-                os.killpg(os.getpgrp(), signal.SIGTERM)
-                return
-    threading.Thread(target=watch_parent, daemon=True).start()
+    threading.Thread(target=stop_when_parent_exits, args=(parent,), daemon=True).start()
     folder = args.folder
     status = read_json(folder / 'status.json')
     def update(stage, message, progress=None):
@@ -35,7 +68,7 @@ def main():
     try:
         import imageio_ffmpeg
         import numpy as np
-        import mlx_whisper
+        transcribe_chunk, engine_label = create_transcriber(args.engine, args.model)
         video_id = status['videoId']
         if not VIDEO.fullmatch(video_id):
             raise ValueError('无效视频编号。')
@@ -61,10 +94,8 @@ def main():
             begin = max(0, offset-2)
             end = min(duration, offset+chunk_seconds+2)
             update('transcribing', f'正在转写英文原声：{offset//60} / {math.ceil(duration/60)} 分钟', 18+int(offset/duration*80))
-            result = mlx_whisper.transcribe(audio[int(begin*16000):int(end*16000)], path_or_hf_repo=args.model,
-                language='en', task='transcribe', temperature=0, condition_on_previous_text=False,
-                word_timestamps=True, verbose=None)
-            for item in result.get('segments', []):
+            result = transcribe_chunk(audio[int(begin*16000):int(end*16000)])
+            for item in result:
                 text = str(item.get('text','')).strip()
                 start, finish = begin+float(item['start']), begin+float(item['end'])
                 middle = (start+finish)/2
@@ -89,7 +120,7 @@ def main():
         if not segments:
             raise ValueError('未识别到可用英文语音；原字幕未被替换。')
         result = {'videoId':video_id,'transcript':segments,'language':'en','source':'local-asr',
-            **segment_meta,'engine':'Whisper small.en','duration':duration,'createdAt':time.time(),
+            **segment_meta,'engine':engine_label,'duration':duration,'createdAt':time.time(),
             'videoTitle':str(info.get('title','')),'notice':'英文原声自动转写，可能有识别误差，请结合音频核对。'}
         status.pop('result',None)
         write_json(folder/'result.json',result)

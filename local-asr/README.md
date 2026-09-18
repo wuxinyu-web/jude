@@ -1,12 +1,25 @@
+1.22.0：新增 64 位 Windows 10/11 本地英文原声转写。Windows 使用 faster-whisper CPU int8，不要求 NVIDIA 显卡或 CUDA；Apple Silicon Mac 继续使用 MLX。两端共用原有下载限制、分段进度、取消、缓存和字幕应用流程。
+
 1.12.0：超过 3 小时的长分 P 自动划分为每段 20 分钟的学习片段（原视频不变，最多 24 小时）。从当前播放位置选择片段，只读取该段音频；可选前后片段并点击「转写本段」。已完成片段复用，字幕以原视频绝对时间合并、缓存，不覆盖其他片段。
 
 本次更新需要重启本地服务以启用片段接口，同时重新加载扩展并刷新视频页面。
 
 # 本地英文原声转写
 
-适用于 Apple Silicon Mac。Whisper 直接识别公开 B 站视频的英文音频，使用 `task=transcribe`，不会通过翻译中文字幕生成英文。ASR 仍可能听错人名、俚语或噪声中的台词，结果需要结合原声核对。
+适用于 Apple Silicon Mac 和 64 位 Intel／AMD Windows 10/11。Whisper 直接识别公开 B 站视频的英文音频，使用 `task=transcribe`，不会通过翻译中文字幕生成英文。ASR 仍可能听错人名、俚语或噪声中的台词，结果需要结合原声核对。
 
 ## 安装与启动
+
+### Windows 10/11（64 位）
+
+1. 从 python.org 安装 64 位 Python 3.12，并勾选 Python Launcher。
+2. 在 `chrome://extensions` 开启开发者模式并复制「句得」的扩展 ID。
+3. 双击 `install-windows.cmd`，粘贴扩展 ID，等待依赖和约 486 MB 模型下载完成。
+4. 以后使用前双击 `start-windows.cmd`，保持黑色服务窗口打开。
+
+Windows 默认用 CPU int8 识别，普通 Intel／AMD CPU 即可，不要求独立显卡、CUDA、云端账号或 AI token。第一次安装需要联网；以后模型留在本机。Windows ARM 设备尚未验证，不在当前支持范围。
+
+### Apple Silicon Mac
 
 使用 Python 3.12 或更新版本，在此目录运行：
 
@@ -15,7 +28,7 @@ python3 install.py --extension-id 你的Chrome学习扩展ID
 python3 start.py
 ```
 
-扩展 ID 可在 `chrome://extensions` 的开发者模式中复制。安装器创建独立虚拟环境、安装锁定依赖并下载约 481 MB 的模型。模型固定至 `mlx-community/whisper-small.en-mlx` 提交 `52a88bf6e98b114a210c21bb83e22d6e1505cb73`，权重 SHA-256 为 `1bb29b030aca711a035f7a084a0eefac6251ecc2bdd356fa748858fbad082f5a`，只有校验一致才使用。官方源不通时使用同一文件的镜像；不下载远程 Python 模型代码。
+扩展 ID 可在 `chrome://extensions` 的开发者模式中复制。安装器创建独立虚拟环境并安装平台对应的固定版本依赖。Mac 下载约 481 MB 的 `mlx-community/whisper-small.en-mlx`；Windows 下载约 486 MB 的 `Systran/faster-whisper-small.en`。两个模型都固定到具体提交，主权重均执行 SHA-256 校验；官方源不通时使用同一文件的镜像，不下载远程 Python 模型代码。
 
 保持服务终端打开，然后在学习侧栏点击「转写英文原声」。任务继续运行时可以关闭侧栏；重新打开同一个视频会恢复任务状态。关闭服务终端会停止服务，再次启动时未完成任务标记为失败，可手动重试。
 
@@ -23,7 +36,7 @@ python3 start.py
 
 - 支持公开可访问的 BV 视频和分 P；不读取 Chrome Cookie，不绕过登录、付费、地区或 DRM 限制。公开视频不可访问时明确失败。
 - 单次最多 180 分钟、300 MB 音频，同一时间处理一个视频。显示下载／解码／转写进度；取消会终止本服务的处理进程并删除临时音频。
-- 转写在本机执行，不把音频发送至 Supadata、DeepSeek 或其他云端识别服务。联网用于读取 B 站公开音频以及首次下载依赖和模型。
+- 转写在本机执行，不把音频发送至 Supadata、DeepSeek 或其他云端识别服务，也不消耗这些服务的 token。联网用于读取 B 站公开音频以及首次下载依赖和模型。
 - 转写成功后由扩展校验视频号、分 P、英文标记及时间戳，再应用结果。分段结果会提前应用并标记为未完成；失败或取消保留已生成英文及原站备份，换视频后不会自动覆盖新视频。
 - 原站中文字幕保留在扩展本地缓存中。双语模式仅在时间边界匹配时复用原站中文；较长中文轨不能对应新拆分英文时，使用现有 AI 翻译该段英文，不重复整段中文；可点击「恢复原站字幕」。没有中文轨时，原有英文到中文翻译仍使用配置的 AI 服务。
 - 服务仅绑定 `127.0.0.1:8766`，校验 Host、扩展 ID 以及浏览器 Origin，只接受视频编号，拒绝任意网址、文件路径和远程页面请求。
@@ -36,6 +49,8 @@ python3 -m unittest discover -s . -p 'test_*.py'
 ```
 
 仓库 Node 测试验证 ASR 返回校验和中文时间对齐。设置 `YTD_TEST_ASR=1 YTD_TEST_PLATFORM=bilibili` 运行浏览器测试可验证真实回环 HTTP 连接、取消、应用英文、原文备份和恢复；测试响应模拟，不运行模型或调用付费服务。
+
+Windows 代码路径有自动化测试覆盖；发布前仍需在 Windows 10/11 x64 实机完成首次安装、公开 B 站视频转写、取消和重启恢复验证。
 
 ## 分段输出（1.11.0）
 

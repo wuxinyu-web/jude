@@ -1,6 +1,6 @@
 {
   "name": "youtube-digest",
-  "version": "1.13.2",
+  "version": "1.22.0",
   "private": true,
   "description": "Turn YouTube videos into learning resources with transcripts, bilingual translation, AI overviews, and notes.",
   "license": "MIT",
@@ -8,8 +8,12 @@
     "test": "node --test tests/*.test.js",
     "check": "bash scripts/check-release.sh",
     "package": "bash scripts/package-extension.sh",
+    "package:asr": "bash scripts/package-local-asr.sh",
     "vendor:docx": "node scripts/vendor-docx.cjs",
-    "test:browser": "node scripts/browser-test.cjs"
+    "test:browser": "node scripts/browser-test.cjs",
+    "test:challenge:browser": "node scripts/challenge-browser-test.cjs",
+    "package:safari": "node scripts/package-safari.cjs",
+    "project:ios": "node scripts/generate-safari-ios.cjs"
   },
   "devDependencies": {
     "docx": "9.6.1",

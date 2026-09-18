@@ -1,6 +1,6 @@
 # Project guide
 
-视频英语学习开发版 is a plain HTML/CSS/JavaScript Manifest V3 extension. Runtime files and the pinned Word browser library are checked in; no application build step is needed to load it.
+句得 is a plain HTML/CSS/JavaScript Manifest V3 extension. Runtime files and the pinned Word browser library are checked in; no application build step is needed to load it.
 
 ## Boundaries
 

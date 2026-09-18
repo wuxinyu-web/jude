@@ -34,7 +34,7 @@ const debugLog = (...args) => {
 // Prevent the YouTube content script from reading API keys or cached data.
 // Side panel, options, and service-worker contexts remain trusted.
 chrome.storage.local
-  .setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" })
+  .setAccessLevel?.({ accessLevel: "TRUSTED_CONTEXTS" })
   .catch((error) =>
     console.warn("[YouTube Digest] Could not restrict storage access:", error),
   );
@@ -255,7 +255,7 @@ chrome.action.onClicked.addListener((tab) => {
 /**
  * Allow the side panel to open on any page, but it's designed for YouTube.
  */
-chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false });
+chrome.sidePanel?.setPanelBehavior({ openPanelOnActionClick: false });
 
 chrome.runtime.onInstalled.addListener(({ reason }) => {
   if (reason === "install") chrome.runtime.openOptionsPage();
@@ -293,7 +293,7 @@ const panelReconciliations = new Map();
 async function closePanelForTab(tabId, windowId, isCurrent = () => true) {
   // Chrome 116 does not expose sidePanel.close. Disabling the tab below is
   // the compatibility path on older supported versions.
-  if (typeof chrome.sidePanel.close !== "function") return;
+  if (typeof chrome.sidePanel?.close !== "function") return;
 
   try {
     await chrome.sidePanel.close({ tabId });
@@ -310,6 +310,7 @@ async function closePanelForTab(tabId, windowId, isCurrent = () => true) {
 }
 
 async function updatePanelForTab(tabId, url, windowId) {
+  if (!chrome.sidePanel) return;
   const snapshot = {};
   panelReconciliations.set(tabId, snapshot);
   const isCurrent = () => panelReconciliations.get(tabId) === snapshot;
@@ -521,6 +522,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.action === "openSidePanel") {
+    if (!chrome.sidePanel) {
+      const ownPopup = sender.id === chrome.runtime.id && sender.url === chrome.runtime.getURL('safari/popup.html');
+      const ownPage = sender.id === chrome.runtime.id && sender.tab?.id && YTD_PLATFORM.videoIdFromUrl(sender.url);
+      if (!ownPopup && !ownPage) { sendResponse({success:false,error:'不允许的打开请求。'}); return false; }
+      (async()=>{
+        const tabId=ownPage?sender.tab.id:(await chrome.tabs.query({active:true,currentWindow:true}))[0]?.id;
+        if(!Number.isInteger(tabId))throw new Error('请先在 Safari 打开 YouTube 或哔哩哔哩视频网页。');
+        return YTD_LAYOUT.vertical(tabId);
+      })().then(sendResponse,e=>sendResponse({success:false,error:e.message}));return true;
+    }
     if (globalThis.YTD_LAYOUT?.isVertical() && sender.tab?.id) {
       YTD_LAYOUT.vertical(sender.tab.id).then(sendResponse,e=>sendResponse({success:false,error:e.message}));return true;
     }
@@ -2400,3 +2411,5 @@ globalThis.__YTD_VOCABULARY_TESTING__ = {
 
 // Learning features use separate modules and storage keys.
 importScripts("lib/learning-core.js", "lib/learning-worker.js");
+
+importScripts("lib/challenge-core.js", "lib/challenge-worker.js");
