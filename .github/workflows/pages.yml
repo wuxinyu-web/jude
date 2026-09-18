@@ -29,7 +29,7 @@ jobs:
       - name: Prepare static demo
         run: |
           mkdir -p _site
-          cp index.html demo.css demo.js lesson.json lesson.mp4 icon.png poster.jpg jude-v1.17.0.zip jude-iphone-safari-1.17.0-project.zip _site/
+          cp index.html demo.css demo.js lesson.json lesson.mp4 icon.png poster.jpg jude-v1.22.0.zip jude-local-asr-v1.22.0.zip jude-iphone-safari-1.17.0-project.zip _site/
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site
