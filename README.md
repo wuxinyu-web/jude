@@ -16,18 +16,19 @@ iPhone Safari、Chrome 和电脑浏览器均可直接打开。播放原创示例
 
 Safari 扩展需要开发者签名和真机安装，目前没有 IPA 或 TestFlight 安装入口。iPhone Chrome 不能安装此扩展；可使用上面的独立网页演示。
 
-## v1.17.0 更新
+## v1.22.0 更新
 
-- 修复 Jude 与旧版 YouTube Digest 同时启用时反复创建按钮，导致 YouTube 卡住的问题。
-- 修复上下布局的视频黑屏，并保留 YouTube 原生遮罩的显示逻辑。
-- 增加 iPhone Safari 预览构建、移动页面适配和触摸查词。
-- 增加独立手机网页交互演示。
+- Windows 与 macOS 均支持可选的本地英文原声转写；视频没有字幕时也可从实际音频识别英文。
+- Windows 使用 faster-whisper CPU int8，本地处理，不消耗云端模型 Token。
+- 新增移动端独立导出入口，以及 Excel 导出；生词、长难句分别放在独立 Sheet。
+- 优化左右结构的产品主界面，并完善家长模式说明和测试机制。
+- 保留免登录本地模式；只有开启跨设备同步时才需要邮箱验证码登录。
 
 ## 下载与安装
 
-**[下载句得 v1.17.0](https://github.com/wuxinyu-web/jude/releases/download/v1.17.0/jude-v1.17.0.zip)** · [查看所有版本](https://github.com/wuxinyu-web/jude/releases)
+**[下载句得 v1.22.0](https://github.com/wuxinyu-web/jude/releases/download/v1.22.0/youtube-digest-v1.22.0.zip)** · [下载本地字幕识别助手](https://github.com/wuxinyu-web/jude/releases/download/v1.22.0/jude-local-asr-v1.22.0.zip) · [查看所有版本](https://github.com/wuxinyu-web/jude/releases)
 
-1. 下载上面的 `jude-v1.17.0.zip` 并解压。
+1. 下载上面的 `youtube-digest-v1.22.0.zip` 并解压。
 2. 在桌面 Chrome 地址栏输入 `chrome://extensions`，打开右上角「开发者模式」。
 3. 点击「加载已解压的扩展程序」，选择直接包含 `manifest.json` 的文件夹。
 4. 打开哔哩哔哩或 YouTube 视频，点击「句得」扩展。安装后请保留该文件夹。
@@ -51,7 +52,7 @@ Safari 扩展需要开发者签名和真机安装，目前没有 IPA 或 TestFli
 
 ## 没有字幕怎么办
 
-可选的 [本地英文原声转写服务](https://github.com/wuxinyu-web/jude/releases/download/v1.16.4/jude-local-asr-v1.16.4.zip) 单独安装，**仅适用于 Apple Silicon Mac**，需要 Python 3.12+。解压后按其中 README 安装并启动；首次下载约 481 MB 模型。本地服务不包含在扩展 ZIP 中。Windows 用户可以使用已有网站字幕，其余功能不依赖此服务。
+可选的 [本地英文原声转写助手](https://github.com/wuxinyu-web/jude/releases/download/v1.22.0/jude-local-asr-v1.22.0.zip) 单独安装，支持 Windows 与 macOS。解压后按包内 README 安装并启动；首次使用会下载语音识别模型。本地助手不包含在扩展 ZIP 中，不需要购买云端模型 Token。
 
 本地转写会临时使用内存和磁盘；正常结束、失败或取消时清理临时音频，模型保留供复用。它不能绕过付费、地区或 DRM 限制，不保证所有视频均可识别。
 
