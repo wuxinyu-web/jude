@@ -26,9 +26,25 @@ Safari 扩展需要开发者签名和真机安装，目前没有 IPA 或 TestFli
 
 ## 下载与安装
 
-**[下载句得 v1.22.0](https://github.com/wuxinyu-web/jude/releases/download/v1.22.0/youtube-digest-v1.22.0.zip)** · **[下载 Windows 本地字幕识别便携包](https://gitcode.com/AlyssaWu/jude/releases/download/v1.22.0/jude-local-asr-windows-portable-v1.22.0.zip)** · [下载 macOS / 源码包](https://github.com/wuxinyu-web/jude/releases/download/v1.22.0/jude-local-asr-v1.22.0.zip) · [查看所有版本](https://github.com/wuxinyu-web/jude/releases)
+### 1. Chrome 扩展（必须下载）
 
-1. 下载上面的 `youtube-digest-v1.22.0.zip` 并解压。
+**[下载句得 Chrome 扩展 v1.22.0](https://github.com/wuxinyu-web/jude/releases/download/v1.22.0/youtube-digest-v1.22.0.zip)**
+
+这是需要加载到 Chrome 的扩展本体，解压后的文件夹中包含 `manifest.json`。
+
+### 2. Windows 本地字幕识别助手（可选）
+
+**[下载 Windows 本地字幕识别便携包](https://gitcode.com/AlyssaWu/jude/releases/download/v1.22.0/jude-local-asr-windows-portable-v1.22.0.zip)**
+
+仅在 B 站等视频没有可用字幕、需要识别英文原声时安装。**这个包不能加载到 Chrome**；请单独解压后双击 `install-windows.cmd`。
+
+### 3. macOS / 源码版字幕识别助手（可选）
+
+[下载 macOS / 源码包](https://github.com/wuxinyu-web/jude/releases/download/v1.22.0/jude-local-asr-v1.22.0.zip) · [查看所有版本](https://github.com/wuxinyu-web/jude/releases)
+
+下面的扩展安装步骤只适用于第 1 个 `youtube-digest-v1.22.0.zip`：
+
+1. 下载第 1 个 `youtube-digest-v1.22.0.zip` 并解压。
 2. 在桌面 Chrome 地址栏输入 `chrome://extensions`，打开右上角「开发者模式」。
 3. 点击「加载已解压的扩展程序」，选择直接包含 `manifest.json` 的文件夹。
 4. 打开哔哩哔哩或 YouTube 视频，点击「句得」扩展。安装后请保留该文件夹。
