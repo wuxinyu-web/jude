@@ -26,7 +26,7 @@ Safari 扩展需要开发者签名和真机安装，目前没有 IPA 或 TestFli
 
 ## 下载与安装
 
-**[下载句得 v1.22.0](https://github.com/wuxinyu-web/jude/releases/download/v1.22.0/youtube-digest-v1.22.0.zip)** · **[下载 Windows 本地字幕识别便携包](https://github.com/wuxinyu-web/jude/releases/download/v1.22.0/jude-local-asr-windows-portable-v1.22.0.zip)** · [下载 macOS / 源码包](https://github.com/wuxinyu-web/jude/releases/download/v1.22.0/jude-local-asr-v1.22.0.zip) · [查看所有版本](https://github.com/wuxinyu-web/jude/releases)
+**[下载句得 v1.22.0](https://github.com/wuxinyu-web/jude/releases/download/v1.22.0/youtube-digest-v1.22.0.zip)** · **[下载 Windows 本地字幕识别便携包](https://gitcode.com/AlyssaWu/jude/releases/download/v1.22.0/jude-local-asr-windows-portable-v1.22.0.zip)** · [下载 macOS / 源码包](https://github.com/wuxinyu-web/jude/releases/download/v1.22.0/jude-local-asr-v1.22.0.zip) · [查看所有版本](https://github.com/wuxinyu-web/jude/releases)
 
 1. 下载上面的 `youtube-digest-v1.22.0.zip` 并解压。
 2. 在桌面 Chrome 地址栏输入 `chrome://extensions`，打开右上角「开发者模式」。
@@ -52,7 +52,7 @@ Safari 扩展需要开发者签名和真机安装，目前没有 IPA 或 TestFli
 
 ## 没有字幕怎么办
 
-可选的本地英文原声转写助手需要单独安装。Windows 推荐下载已包含便携 Python 和依赖的 [Windows 便携包](https://github.com/wuxinyu-web/jude/releases/download/v1.22.0/jude-local-asr-windows-portable-v1.22.0.zip)；macOS 或需要源码安装时下载 [通用包](https://github.com/wuxinyu-web/jude/releases/download/v1.22.0/jude-local-asr-v1.22.0.zip)。解压后按包内 README 安装并启动；首次使用会下载语音识别模型。本地助手不包含在扩展 ZIP 中，不需要购买云端模型 Token。
+可选的本地英文原声转写助手需要单独安装。Windows 推荐下载已包含便携 Python 和依赖的 [Windows 便携包](https://gitcode.com/AlyssaWu/jude/releases/download/v1.22.0/jude-local-asr-windows-portable-v1.22.0.zip)；macOS 或需要源码安装时下载 [通用包](https://github.com/wuxinyu-web/jude/releases/download/v1.22.0/jude-local-asr-v1.22.0.zip)。解压后按包内 README 安装并启动；首次使用会下载语音识别模型。本地助手不包含在扩展 ZIP 中，不需要购买云端模型 Token。
 
 本地转写会临时使用内存和磁盘；正常结束、失败或取消时清理临时音频，模型保留供复用。它不能绕过付费、地区或 DRM 限制，不保证所有视频均可识别。
 
